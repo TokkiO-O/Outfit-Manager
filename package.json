@@ -1,0 +1,10 @@
+{
+  "name": "outfit-manager-rework",
+  "version": "2.4.7",
+  "private": true,
+  "type": "module",
+  "description": "穿搭管理器二改版前端",
+  "scripts": {
+    "test": "node scripts/run-tests.cjs"
+  }
+}
