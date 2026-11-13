@@ -6,7 +6,7 @@ import { loadMeta, saveMeta } from './meta.js';
 import { coldStubFor, deletePartition, loadPartition, savePartition } from './partitions.js';
 import { preloadAllPartitions } from './preload.js';
 import { DB, genId8 } from './state.js';
-import { setChatPreset, setChatView, getChatState, getBoundPresetId } from '../chat-state.js';
+import { setChatPreset, setChatView, getChatState, getBoundPresetId, getWardrobeView } from '../chat-state.js';
 import { charIdByName, charNameById, cleanUserActivePartitions, currentPartKey, currentUserPartKey, loadCurrent, saveCurrent, syncActivePartitions } from './view.js';
 
 //  兼容旧接口（过渡期，逐步废弃）
@@ -45,13 +45,14 @@ export function load() {
         'currentView', 'activePresetId'
     ];
     metaKeys.forEach(function (k) { d[k] = meta[k]; });
-    var chat=getChatState();if(chat){d.activePresetId=getBoundPresetId();d.currentView=chat.view&&chat.view.kind||'user';}
+    var chat=getChatState(),view=getWardrobeView();if(chat){d.activePresetId=getBoundPresetId();d.currentView=view.kind;}
 
     // currentChar: charId → 角色名（旧 UI 使用角色名）
-    if (meta.currentChar === SHARED_CHAR_KEY) {
+    var currentChar = chat ? view.characterId : meta.currentChar;
+    if (currentChar === SHARED_CHAR_KEY) {
         d.currentChar = SHARED_CHAR_KEY;
-    } else if (meta.currentChar) {
-        d.currentChar = charNameById(meta.currentChar) || '';
+    } else if (currentChar) {
+        d.currentChar = charNameById(currentChar) || '';
     } else {
         d.currentChar = '';
     }

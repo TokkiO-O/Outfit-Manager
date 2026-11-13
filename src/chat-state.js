@@ -158,9 +158,24 @@ export function getBoundPresetId() {
     if(!id&&(DB.metaCache&&DB.metaCache.presets||[]).some(function(item){return item.id==='__default__'&&item.partKey==='user:__default__';}))id='__default__';
     return id&&(DB.metaCache&&DB.metaCache.presets||[]).some(function(item){return item.id===id;})?id:null;
 }
+export function getWardrobeView() {
+    var chat = getChatState(), meta = DB.metaCache || {};
+    var view = chat ? chat.view || { kind: 'user', characterId: '' } : { kind: meta.currentView, characterId: meta.currentChar };
+    if (view.kind !== 'char') return { kind: 'user', characterId: '' };
+    var id = view.characterId;
+    if (id !== '__shared__' && !(meta.charIndex || []).some(function (item) { return item.id === id; })) id = '__shared__';
+    return { kind: 'char', characterId: id || '__shared__' };
+}
 export function setChatView(kind,characterId) {
     var chat=getChatState();if(!chat)return;
-    chat.view={kind:kind==='char'?'char':'user',characterId:kind==='char'?(characterId||'__shared__'):''};
+    var previous=chat.view||{},lastCharacterId=previous.lastCharacterId||previous.characterId||'';
+    if(kind==='char'){
+        characterId=characterId||lastCharacterId||'__shared__';
+        if(characterId!=='__shared__'&&!(DB.metaCache&&DB.metaCache.charIndex||[]).some(function(item){return item.id===characterId;}))characterId='__shared__';
+        lastCharacterId=characterId;
+    }
+    chat.view={kind:kind==='char'?'char':'user',characterId:kind==='char'?characterId:''};
+    if(lastCharacterId)chat.view.lastCharacterId=lastCharacterId;
     if(DB.metaCache){DB.metaCache.currentView=chat.view.kind;DB.metaCache.currentChar=chat.view.characterId;}
     saveChatState();
 }
@@ -260,9 +275,9 @@ export function applyChatContext() {
     }
     if (DB.metaCache) {
         DB.metaCache.activePresetId = getBoundPresetId();
-        var view=chat.view||{kind:'user',characterId:''};
+        var view=getWardrobeView();
         DB.metaCache.currentView=view.kind;
-        DB.metaCache.currentChar=view.kind==='char'&&DB.metaCache.charIndex.some(function(item){return item.id===view.characterId;})?view.characterId:view.kind==='char'?'__shared__':'';
+        DB.metaCache.currentChar=view.characterId;
     }
     Object.keys(DB.partCache).forEach(function (key) { applyChatPartition(key, DB.partCache[key]); });
     state.resolvedImages = {};

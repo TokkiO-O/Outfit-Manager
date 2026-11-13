@@ -3,7 +3,7 @@
 
 import { currentPresetLabel } from './preset-service.js';
 import { decorateMainIcons } from './ui-icons.js';
-import { getWardrobeMode, setWardrobeMode, applyChatContext } from './chat-state.js';
+import { getWardrobeMode, setWardrobeMode, applyChatContext, getWardrobeView } from './chat-state.js';
 // 全屏弹窗、视角切换、分类栏、穿搭网格、底栏状态、详情面板
 // v2: 使用分包存储 API (loadMeta/loadCurrent/saveCurrent/etc.)
 //     角色管理仍经由兼容层 load()/save() 处理 charIndex ↔ charNames 翻译
@@ -13,7 +13,9 @@ import {
     loadMeta, saveMeta,
     loadCurrent,
     charNameById,
+    charIdByName,
     currentPartKey,
+    switchWardrobeView,
     isPartitionLoaded,
     ensurePartitionLoaded,
     maintainPartitionCache
@@ -456,22 +458,7 @@ function openPopup() {
     });
     // 视角切换
     ov.querySelector('#om-view-toggle').addEventListener('click', function () {
-        var m = loadMeta();
-        m.currentView = m.currentView === 'char' ? 'user' : 'char';
-        saveMeta(m);
-        charPanelExpanded = false;
-        state.curCat = '__all__'; state.catDrillParent = null; state.curSubCat = null;
-        clearKitDraft();
-        closeDetailPanel();
-        var isNowUser = m.currentView !== 'char';
-        var vBtn = ov.querySelector('#om-view-toggle');
-        if (vBtn) {
-            vBtn.innerHTML = '<i class="fa-solid ' + (isNowUser ? 'fa-user' : 'fa-masks-theater') + '"></i>';
-            vBtn.insertAdjacentHTML('beforeend', '<span class="om-sticker-badge">✧</span>');
-            decorateMainIcons(ov);
-            vBtn.title = isNowUser ? '切换到角色衣柜' : '切换到User衣柜';
-        }
-        renderViewbar(); renderCatbar(); renderGrid(); renderBottomStatus();
+        changeWardrobeView(getWardrobeView().kind === 'char' ? 'user' : 'char');
     });
     // 搜索
     ov.querySelector('#om-search-toggle').addEventListener('click', function () {
@@ -638,11 +625,36 @@ function closePopup() {
 var charPanelExpanded = false;
 var collapsedGroups = {};
 
+function changeWardrobeView(kind, characterId) {
+    switchWardrobeView(kind, characterId);
+    applyChatContext();
+    charPanelExpanded = false;
+    state.curCat = '__all__'; state.catDrillParent = null; state.curSubCat = null;
+    state.accCat = '__all__'; state.accDrillParent = null; state.accSubCat = null;
+    state.batchMode = false; state.batchSelected = [];
+    clearKitDraft(); closeDetailPanel();
+    renderViewbar(); renderCatbar(); renderAccCatbar(); renderGrid(); renderBottomStatus();
+}
+
 function renderViewbar() {
     syncAccToggleBtn();
+    updateBatchButtonState();
+    updateFilterBarForMode();
     var vbar = document.getElementById('om-viewbar'); if (!vbar) return;
     var meta = loadMeta();
-    var isUser = meta.currentView !== 'char';
+    var view = getWardrobeView(), isUser = view.kind !== 'char';
+    var vBtn = document.getElementById('om-view-toggle');
+    if (vBtn) {
+        var icon = isUser ? 'fa-user' : 'fa-masks-theater';
+        if (vBtn.dataset.view !== view.kind) {
+            vBtn.innerHTML = '<i class="fa-solid ' + icon + '"></i><span class="om-sticker-badge">✧</span>';
+            vBtn.dataset.view = view.kind;
+            decorateMainIcons(vBtn.closest('.om-overlay'));
+        }
+        vBtn.title = isUser ? '切换到角色衣柜' : '切换到User衣柜';
+        vBtn.setAttribute('aria-label', vBtn.title);
+        vBtn.setAttribute('aria-pressed', String(!isUser));
+    }
     vbar.style.position = 'relative';
 
     if (isUser) {
@@ -652,9 +664,9 @@ function renderViewbar() {
 
     vbar.style.display = '';
     var currentCharName = '';
-    if (meta.currentChar) {
-        if (meta.currentChar === SHARED_CHAR_KEY) currentCharName = SHARED_CHAR_LABEL;
-        else currentCharName = charNameById(meta.currentChar) || '';
+    if (view.characterId) {
+        if (view.characterId === SHARED_CHAR_KEY) currentCharName = SHARED_CHAR_LABEL;
+        else currentCharName = charNameById(view.characterId) || '';
     }
     var charLabel = currentCharName || '搜索角色…';
 
@@ -841,10 +853,9 @@ function renderCharDropdown(vbar, d, query) {
     dropdown.querySelectorAll('.om-char-row').forEach(function (row) {
         row.addEventListener('click', function (e) {
             if (e.target.closest('.om-char-star') || e.target.closest('.om-char-actions')) return;
-            var dd = load(); dd.currentChar = row.dataset.cn; save(dd);
-            charPanelExpanded = false;
-            state.curCat = '__all__'; state.catDrillParent = null; state.curSubCat = null;
-            renderViewbar(); renderCatbar(); renderGrid(); renderBottomStatus();
+            var id = row.dataset.cn === SHARED_CHAR_KEY ? SHARED_CHAR_KEY : charIdByName(row.dataset.cn);
+            if (!id) { toast('这个角色衣柜已不存在，请重新选择', true); return; }
+            changeWardrobeView('char', id);
         });
     });
     // 收藏

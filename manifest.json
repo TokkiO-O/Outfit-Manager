@@ -1,6 +1,6 @@
 {
   "display_name": "穿搭管理器 · 二改版",
-  "version": "2.4.7",
+  "version": "2.4.8",
   "author": "温水 & 克洛宜",
   "js": "index.js",
   "description": "基于 Outfit Manager 的二次修改版本：聊天独立预设、穿搭与单品、候选衣柜、本地标签、图片描述和便携备份。"

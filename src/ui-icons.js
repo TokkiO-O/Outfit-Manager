@@ -24,6 +24,7 @@ var paths = {
     settings: '<path d="M4 5h16M4 12h16M4 19h16"/><circle cx="8" cy="5" r="2" fill="var(--om-ac-paper)"/><circle cx="16" cy="12" r="2" fill="var(--om-ac-paper)"/><circle cx="10" cy="19" r="2" fill="var(--om-ac-paper)"/>'
 };
 paths.gem='<path d="m3 8 4-5h10l4 5-9 13ZM3 8h18M7 3l5 18 5-18"/>';
+paths.masks='<path d="M3 3c3 2 6 2 9 0v8a4.5 4.5 0 0 1-9 0ZM12 7c3 2 6 2 9 0v9a4.5 4.5 0 0 1-9 0M6 8h1m2 0h1M6 12c1 1 2 1 3 0m6 0h1m2 0h1m-4 5c1-1 2-1 3 0"/>';
 var map = { 'om-acc-toggle':'gem', 'om-search-toggle':'search','om-filter-toggle':'filter','om-view-toggle':'user','om-theme-toggle':'theme','om-x':'close',
     'om-random-pick':'dice','om-batch-toggle':'list','om-bottom-add':'plus','om-bottom-presets':'bookmark','om-bottom-more':'more',
     'om-chat-wardrobe-more':'shirt','om-scene-rec':'bulb','om-style-suggest-more':'wand','om-all-kits-more':'layers',
@@ -42,7 +43,8 @@ export function decorateMainIcons(root, theme) {
         }
         if (!icon || line) return;
         var holder = document.createElement('span');
-        holder.innerHTML = '<svg class="om-line-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' + paths[id==='om-acc-toggle'?(button.getAttribute('data-icon')||'gem'):map[id]] + '</svg>';
+        var symbol = id === 'om-acc-toggle' ? button.getAttribute('data-icon') || 'gem' : id === 'om-view-toggle' && button.dataset.view === 'char' ? 'masks' : map[id];
+        holder.innerHTML = '<svg class="om-line-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' + paths[symbol] + '</svg>';
         holder.firstElementChild.setAttribute('data-original-icon', icon.className);
         icon.replaceWith(holder.firstElementChild);
     });

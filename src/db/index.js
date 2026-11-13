@@ -4,7 +4,7 @@
 export { genId8 } from './state.js';
 export { loadMeta, saveMeta } from './meta.js';
 export { setPartitionLoadedHandler, ensurePartitionLoaded, isPartitionLoaded, maintainPartitionCache, loadPartition, savePartition, ensurePartition, deletePartition } from './partitions.js';
-export { currentUserPartKey, currentPartKey, loadCurrent, saveCurrent, syncActivePartitions, syncCurrentUserActivePartition, loadActivePartitions, charNameById, charIdByName, charPartKey } from './view.js';
+export { currentUserPartKey, currentPartKey, switchWardrobeView, loadCurrent, saveCurrent, syncActivePartitions, syncCurrentUserActivePartition, loadActivePartitions, charNameById, charIdByName, charPartKey } from './view.js';
 export { isServerMode, getImageUrlPrefix, getStorageHealth, getCacheStats, diagnoseServerRecovery, restoreServerSnapshot } from './health.js';
 export { resolveImageForExternal, batchResolveImages, uploadImage } from './images.js';
 export { initStorage } from './init.js';

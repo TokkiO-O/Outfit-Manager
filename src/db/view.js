@@ -6,7 +6,7 @@ import { SHARED_CHAR_KEY } from '../data.js';
 import { loadMeta, saveMeta } from './meta.js';
 import { loadPartition, savePartition, startPartitionLoad } from './partitions.js';
 import { DB } from './state.js';
-import { getChatState, captureChatSelection, setChatPreset, getBoundPresetId } from '../chat-state.js';
+import { getChatState, captureChatSelection, setChatPreset, getBoundPresetId, getWardrobeView, setChatView } from '../chat-state.js';
 
 // ══════════════════════════════════════════════════════════
 //  便捷：当前视角
@@ -27,16 +27,24 @@ export function currentUserPartKey() {
 
 // 当前视角的 partition key
 export function currentPartKey() {
-    var meta = loadMeta();
-    var chat=getChatState(),view=chat&&chat.view;
-    if(view){return view.kind==='char'&&view.characterId&&(view.characterId===SHARED_CHAR_KEY||(meta.charIndex||[]).some(function(item){return item.id===view.characterId;}))?('char:'+view.characterId):currentUserPartKey();}
-    if (meta.currentView === 'char' && meta.currentChar) {
-        // currentChar 存的是 charId
-        var charId = meta.currentChar;
-        if (charId === SHARED_CHAR_KEY) return 'char:__shared__';
-        return 'char:' + charId;
+    loadMeta();
+    var view = getWardrobeView();
+    return view.kind === 'char' ? 'char:' + view.characterId : currentUserPartKey();
+}
+
+// 浏览对象只更新归属，不经过旧版整柜保存，也不更换聊天绑定的 User 预设。
+export function switchWardrobeView(kind, characterId) {
+    var meta = loadMeta(), chat = getChatState();
+    kind = kind === 'char' ? 'char' : 'user';
+    characterId = characterId || (chat && chat.view && (chat.view.lastCharacterId || chat.view.characterId)) || meta.currentChar || SHARED_CHAR_KEY;
+    if (characterId !== SHARED_CHAR_KEY && !(meta.charIndex || []).some(function (item) { return item.id === characterId; })) characterId = SHARED_CHAR_KEY;
+    if (chat) setChatView(kind, characterId);
+    else {
+        meta.currentView = kind;
+        meta.currentChar = characterId;
+        saveMeta(meta);
     }
-    return currentUserPartKey();
+    return currentPartKey();
 }
 
 // 当前视角的 partition（同步读）
