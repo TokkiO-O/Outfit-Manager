@@ -3,6 +3,8 @@
 
 import { diagnosticErrorKind } from './compatibility-journal.js';
 import { OM_VERSION } from './version.js';
+import { diagnosticFrames, sanitizeDiagnosticFrame } from './diagnostic-evidence.js';
+import { RUNTIME_HINTS, runtimeErrorHint, explainRuntimeError } from './runtime-error-reasons.js';
 
 export var RUNTIME_ERROR_KEY = 'om_runtime_errors_v1';
 var LIMIT = 200, MAX_AGE = 7 * 86400000, initialized = false, state, persistence = true;
@@ -18,6 +20,8 @@ var codes = {
     NOT_FUNCTION: '调用的值不是函数', NOT_DEFINED: '引用的变量未定义', SAVE_CONFLICT: '保存时发现版本冲突',
     DB_TRANSACTION_FAILED: '本地存储或事务失败', IMAGE_READ_FAILED: '图片读取失败', PARTITION_READ_FAILED: '衣柜读取失败',
     API_EMPTY_RESULT: 'API 返回空内容', API_RESULT_INVALID: 'API 返回内容无法用于服装描述', SCRIPT_LOAD_FAILED: '扩展脚本或样式加载失败',
+    SCRIPT_SYNTAX_ERROR: '脚本语法无法解析', CALL_STACK_LIMIT: '调用层级超过限制', INVALID_ARRAY_LENGTH: '数组长度无效',
+    API_REJECTED: '接口返回业务错误',
     UNCLASSIFIED: '运行过程中发生错误'
 };
 var ownRoot = null;
@@ -31,7 +35,7 @@ function locationOf(raw, line, column) {
     if (!ownRoot || typeof raw !== 'string' || !raw) return null;
     try {
         var url = new URL(raw, ownRoot);
-        if (url.origin !== ownRoot.origin || !url.pathname.startsWith(ownRoot.pathname)) return null;
+        if (url.protocol !== ownRoot.protocol || url.host !== ownRoot.host || !url.pathname.startsWith(ownRoot.pathname)) return null;
         var file = safeFile(decodeURIComponent(url.pathname.slice(ownRoot.pathname.length)));
         return file ? { file: file, line: number(line, 1e7), column: number(column, 1e7) } : null;
     } catch (ignored) { return null; }
@@ -54,18 +58,24 @@ function describe(error, options) {
     try { text = (typeof error === 'string' ? error : String(property(error, 'name') || '') + ' ' + String(property(error, 'message') || '')).slice(0, 1200); } catch (ignored) {}
     var status = number(options.httpStatus, 599), match;
     if (status < 400) { match = text.match(/\bHTTP\s*[:：]?\s*([45]\d\d)\b/i); status = match ? Number(match[1]) : 0; }
-    var code = 'UNCLASSIFIED', category = diagnosticErrorKind(error);
+    var code = 'UNCLASSIFIED', category = diagnosticErrorKind(error), name = property(error, 'name');
+    var hint = runtimeErrorHint(text, name, options.operation), apiOperation = ['api', 'models', 'vision'].includes(options.operation);
     if (status) { code = 'HTTP_ERROR'; category = 'network'; }
-    else if (/quota|配额|空间不足/i.test(text)) code = 'QUOTA_EXCEEDED';
+    else if (name === 'QuotaExceededError') code = 'QUOTA_EXCEEDED';
     else if (/timeout|timed out|超时/i.test(text)) { code = 'REQUEST_TIMEOUT'; category = 'network'; }
     else if (/invalid string length/i.test(text)) code = 'INVALID_STRING_LENGTH';
     else if (/out of memory|内存不足/i.test(text)) code = 'OUT_OF_MEMORY';
     else if (/circular|循环引用/i.test(text)) code = 'CIRCULAR_JSON';
-    else if (/syntax|json|备份内容不完整/i.test(text)) code = 'INVALID_JSON';
+    else if (/maximum call stack|too much recursion/i.test(text)) code = 'CALL_STACK_LIMIT';
+    else if (/invalid array length/i.test(text)) code = 'INVALID_ARRAY_LENGTH';
     else if (/undefined.*(?:properties|property)|(?:properties|property).*undefined/i.test(text)) code = 'UNDEFINED_PROPERTY';
     else if (/null.*(?:properties|property)|(?:properties|property).*null/i.test(text)) code = 'NULL_PROPERTY';
     else if (/not a function/i.test(text)) code = 'NOT_FUNCTION';
     else if (/not defined/i.test(text)) code = 'NOT_DEFINED';
+    else if (apiOperation && ['api-auth', 'api-quota', 'api-limit', 'api-rate', 'model-missing', 'model-no-images', 'context-limit'].includes(hint)) { code = 'API_REJECTED'; category = 'network'; }
+    else if (/quota|配额|空间不足/i.test(text)) code = 'QUOTA_EXCEEDED';
+    else if (/json|备份内容不完整/i.test(text) || property(error, 'name') === 'SyntaxError' && options.operation === 'import') code = 'INVALID_JSON';
+    else if (property(error, 'name') === 'SyntaxError') code = 'SCRIPT_SYNTAX_ERROR';
     else if (/EDIT_CONFLICT|STALE_CLIENT_REVISION|版本冲突/i.test(text)) { code = 'SAVE_CONFLICT'; category = 'changed'; }
     else if (/未返回可用的服装描述/i.test(text)) code = 'API_RESULT_INVALID';
     else if (/API.*空内容/i.test(text)) code = 'API_EMPTY_RESULT';
@@ -74,7 +84,8 @@ function describe(error, options) {
     else if (category === 'storage') code = 'DB_TRANSACTION_FAILED';
     else if (category === 'network') code = 'NETWORK_FAILED';
     if (options.kind === 'resource') { code = 'SCRIPT_LOAD_FAILED'; category = 'network'; }
-    return { code: code, category: category, httpStatus: status };
+    if (['QUOTA_EXCEEDED', 'UNDEFINED_PROPERTY', 'NULL_PROPERTY', 'NOT_FUNCTION', 'NOT_DEFINED', 'CALL_STACK_LIMIT', 'INVALID_ARRAY_LENGTH', 'INVALID_STRING_LENGTH', 'OUT_OF_MEMORY', 'CIRCULAR_JSON', 'SCRIPT_SYNTAX_ERROR'].includes(code)) hint = 'none';
+    return { code: code, category: category, httpStatus: status, hint: hint };
 }
 export function sanitizeRuntimeErrors(value, now) {
     now = now || Date.now();
@@ -86,8 +97,9 @@ export function sanitizeRuntimeErrors(value, now) {
         if (lastAt < now - MAX_AGE || lastAt > now + 60000) return;
         var entry = { kind: item.kind, operation: item.operation, name: errorNames.includes(item.name) ? item.name : 'Error', code: item.code,
             category: categories.includes(item.category) ? item.category : 'unknown', httpStatus: number(item.httpStatus, 599), firstAt: Math.min(firstAt, lastAt), lastAt: lastAt,
-            count: Math.max(1, number(item.count, 1e7)), version: safeVersion(item.version), frames: [] };
+            count: Math.max(1, number(item.count, 1e7)), version: safeVersion(item.version), frames: [], hint: RUNTIME_HINTS.includes(item.hint) ? item.hint : 'none', related: [] };
         (Array.isArray(item.frames) ? item.frames : []).slice(0, 4).forEach(function (frame) { var file = frame && safeFile(frame.file); if (file) entry.frames.push({ file: file, line: number(frame.line, 1e7), column: number(frame.column, 1e7) }); });
+        (Array.isArray(item.related) ? item.related : []).slice(0, 4).forEach(function (frame) { var clean = sanitizeDiagnosticFrame(frame); if (clean && ['extension', 'server-plugin'].includes(clean.scope)) entry.related.push(clean); });
         result.entries.push(entry);
     });
     return result;
@@ -96,7 +108,11 @@ function notify() { subscribers.slice().forEach(function (fn) { try { fn(); } ca
 export function flushRuntimeErrors() {
     if (flushTimer) clearTimeout(flushTimer); flushTimer = null;
     if (!state) return;
-    try { state = sanitizeRuntimeErrors(state); localStorage.setItem(RUNTIME_ERROR_KEY, JSON.stringify(state)); persistence = true; } catch (ignored) { persistence = false; }
+    try {
+        state = sanitizeRuntimeErrors(state); var serialized = JSON.stringify(state);
+        while (serialized.length > 262144 && state.entries.length) { state.entries = state.entries.slice(10); serialized = JSON.stringify(state); }
+        localStorage.setItem(RUNTIME_ERROR_KEY, serialized); persistence = true;
+    } catch (ignored) { persistence = false; }
     notify();
 }
 function scheduleFlush() { if (!flushTimer) flushTimer = setTimeout(flushRuntimeErrors, 500); }
@@ -135,8 +151,9 @@ export function captureRuntimeError(error, options) {
         if (++burstCount > 40) { state.suppressed = Math.min(1e7, state.suppressed + 1); scheduleFlush(); return; }
         var info = describe(error, options), entry = { kind: kinds.includes(options.kind) ? options.kind : 'handled', operation: Object.prototype.hasOwnProperty.call(operations, options.operation) ? options.operation : 'runtime',
             name: errorNames.includes(property(error, 'name')) ? property(error, 'name') : 'Error', code: info.code, category: info.category, httpStatus: info.httpStatus,
-            firstAt: now, lastAt: now, count: 1, version: OM_VERSION, frames: framesOf(error, options) };
-        var signature = function (row) { return JSON.stringify([row.kind, row.operation, row.name, row.code, row.category, row.httpStatus, row.version, row.frames]); }, key = signature(entry);
+            firstAt: now, lastAt: now, count: 1, version: OM_VERSION, frames: framesOf(error, options), hint: info.hint,
+            related: diagnosticFrames(error, options).filter(function (frame) { return ['extension', 'server-plugin'].includes(frame.scope); }).slice(0, 4) };
+        var signature = function (row) { return JSON.stringify([row.kind, row.operation, row.name, row.code, row.category, row.httpStatus, row.version, row.frames, row.hint, row.related]); }, key = signature(entry);
         state.entries = state.entries.filter(function (row) { return row.lastAt >= now - MAX_AGE; });
         var index = state.entries.findIndex(function (row) { return signature(row) === key; });
         if (index !== -1) { var old = state.entries.splice(index, 1)[0]; entry.firstAt = old.firstAt; entry.count = Math.min(1e7, old.count + 1); }
@@ -151,8 +168,15 @@ export function setRuntimeErrorsEnabled(enabled) { initializeRuntimeErrors(); st
 export function clearRuntimeErrors() { initializeRuntimeErrors(); state.entries = []; state.suppressed = 0; burstAt = 0; burstCount = 0; flushRuntimeErrors(); }
 export function subscribeRuntimeErrors(fn) { subscribers.push(fn); return function () { subscribers = subscribers.filter(function (item) { return item !== fn; }); }; }
 export function runtimeErrorOperation(value) { return Object.prototype.hasOwnProperty.call(operations, value) ? operations[value] : operations.runtime; }
-export function runtimeErrorSummary(entry) { return (entry.code === 'HTTP_ERROR' ? codes.HTTP_ERROR + ' · HTTP ' + entry.httpStatus : codes[entry.code] || codes.UNCLASSIFIED); }
+export function runtimeErrorSummary(entry) {
+    if (entry.code === 'QUOTA_EXCEEDED' && entry.name !== 'QuotaExceededError') return '存储配额限制（位置待核实）';
+    var hint = { 'api-auth': '身份验证未通过', 'api-quota': '接口返回额度不足', 'api-limit': '接口配额限制', 'api-rate': '接口请求限流', 'model-missing': '接口未找到模型', 'model-no-images': '模型不支持图片输入', 'context-limit': '请求上下文过长' }[entry.hint];
+    if (entry.code !== 'HTTP_ERROR') return entry.code === 'API_REJECTED' ? hint || codes.API_REJECTED : codes[entry.code] || codes.UNCLASSIFIED;
+    var label = hint || { 401: '身份验证未通过', 403: '接口拒绝访问', 404: '接口路径或模型未找到', 413: '请求内容过大', 429: '接口限流或额度限制' }[entry.httpStatus] || (entry.httpStatus >= 500 ? '接口或上游服务异常' : codes.HTTP_ERROR);
+    return label + ' · HTTP ' + entry.httpStatus;
+}
 export function exportRuntimeErrors() {
     flushRuntimeErrors(); var log = getRuntimeErrors();
+    log.data.entries = log.data.entries.map(function (entry) { return Object.assign({}, entry, { analysis: explainRuntimeError(entry) }); });
     return { schemaVersion: 1, extensionVersion: OM_VERSION, generatedAt: new Date().toISOString(), scope: '仅保留穿搭自身的异常及已接入的功能失败。包含错误分类、次数和扩展内文件位置；不保存原始报错正文、函数名、完整地址、API 配置或衣柜与聊天内容。没有调用栈的拒绝和其他扩展异常可能无法归属。', log: log };
 }

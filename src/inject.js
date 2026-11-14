@@ -13,6 +13,8 @@ import { getChatState, sceneText, getChatIdentity } from './chat-state.js';
 import { buildInjectionPlan } from './injection-plan.js';
 import { answerCompatibilityProbe, markCompatibilityHooks, markCompatibilityCompletion } from './compatibility-probe.js';
 import { recordCompatibilityRequest } from './compatibility-journal.js';
+import { diagnosticFrames } from './diagnostic-evidence.js';
+import { captureRuntimeError } from './runtime-errors.js';
 
 var BAIBAOKU_SAVE_GENERATE_PATH = '/api/plugins/baibaoku/v1/chats/save-generate';
 var RECENT_INJECTED_BODY_TTL = 2 * 60 * 1000;
@@ -382,28 +384,32 @@ export function setupInjection() {
 
     var origFetch = window.fetch;
     window.fetch = function (input, init) {
+        var forwarded = arguments;
         try {
             var probe = answerCompatibilityProbe(input, init); if (probe) return probe;
             // 跳过插件内部的 API 调用
             if (init && (init.__omInternal || (init.headers && (init.headers['X-OM-Internal'] || (typeof init.headers.get === 'function' && init.headers.get('X-OM-Internal')))))) {
                 var internal = Object.assign({}, init); delete internal.__omInternal;
-                return origFetch.call(this, input, internal);
+                forwarded = [input, internal];
+            } else if (isChatGenerationRequest(input)) {
+                recordCompatibilityRequest(isBaibaokuSaveGenerateRequest(input) ? 'background' : 'normal');
+                if (init && init.body && typeof init.body === 'string') {
+                    var nb = tryInjectBody(init.body, { baibaokuSaveGenerate: isBaibaokuSaveGenerateRequest(input) });
+                    if (nb) forwarded = [input, Object.assign({}, init, { body: nb })];
+                }
             }
-            if (!isChatGenerationRequest(input)) return origFetch.apply(this, arguments);
-            recordCompatibilityRequest(isBaibaokuSaveGenerateRequest(input) ? 'background' : 'normal');
-            if (init && init.body && typeof init.body === 'string') {
-                var nb = tryInjectBody(init.body, { baibaokuSaveGenerate: isBaibaokuSaveGenerateRequest(input) });
-                if (nb) { init = Object.assign({}, init, { body: nb }); return origFetch.call(this, input, init); }
-            }
-        } catch (e) {}
-        return origFetch.apply(this, arguments);
+        } catch (e) { captureRuntimeError(e, { operation: 'injection', source: 'src/inject.js' }); }
+        // Forward once, outside the injection catch. An upstream failure is not
+        // an injection failure and must not cause a second generation request.
+        return origFetch.apply(this, forwarded);
     };
     var origOpen = XMLHttpRequest.prototype.open;
     XMLHttpRequest.prototype.open = function (method, url) { this.__omUrl = url; return origOpen.apply(this, arguments); };
     var origSend = XMLHttpRequest.prototype.send;
     XMLHttpRequest.prototype.send = function (body) {
-        try { if (isChatGenerationRequest(this.__omUrl) && body && typeof body === 'string') { recordCompatibilityRequest('xhr'); var nb = tryInjectBody(body); if (nb) return origSend.call(this, nb); } } catch (e) {}
-        return origSend.apply(this, arguments);
+        var forwarded = arguments;
+        try { if (isChatGenerationRequest(this.__omUrl) && body && typeof body === 'string') { recordCompatibilityRequest('xhr'); var nb = tryInjectBody(body); if (nb) forwarded = [nb]; } } catch (e) { captureRuntimeError(e, { operation: 'injection', source: 'src/inject.js' }); }
+        return origSend.apply(this, forwarded);
     };
     markCompatibilityHooks(window.fetch, XMLHttpRequest.prototype.open, XMLHttpRequest.prototype.send);
 }
@@ -422,4 +428,27 @@ export function getInjectionPreview() {
     var plan = { text: '', rows: [], imageGroups: [], warnings: [], imageCount: 0, estimatedTextTokens: 0, budget: loadMeta().injectionBudget || {} };
     tryInjectPayload({ messages: [{ role: 'user', content: '' }] }, { preview: true, onPlan: function (value) { plan = value; } });
     return plan;
+}
+
+export function runInjectionSelfTest() {
+    var checks = {}, marker = 'OM_DIAGNOSTIC_WORN', key = 'user:__om_diagnostic__';
+    try {
+        var image = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aJ7sAAAAASUVORK5CYII=';
+        var outfits = [{ id: 'worn', name: 'test', description: marker, imageData: image }, { id: 'other', name: 'test', description: 'OM_DIAGNOSTIC_OTHER' }];
+        var owners = [{ name: 'User', partKey: key, outfits: outfits, partition: { outfits: outfits, accessories: [] }, tplSingle: '{{description}}' }];
+        var chat = { current: {} }; chat.current[key] = { outfitId: 'worn', extraAccIds: [], hiddenAccIds: [], locked: false };
+        var meta = { mode: 'both', injectionBudget: { maxTextTokens: 500, maxImages: 1, maxCandidates: 3 }, slotRules: {} };
+        var plan = buildInjectionPlan(owners, meta, { chat: chat, scene: '' });
+        checks.currentOutfit = plan.rows.length === 1 && plan.rows[0].id === 'worn' && plan.text.includes(marker) && !plan.text.includes('OM_DIAGNOSTIC_OTHER');
+        checks.chatIsolation = buildInjectionPlan(owners, meta, { chat: { current: {} }, scene: '' }).rows.length === 0;
+        checks.budget = plan.estimatedTextTokens <= 500 && plan.imageCount <= 1;
+        var payload = { messages: [{ role: 'user', content: 'OM_DIAGNOSTIC_MESSAGE' }] }; injectText(payload, plan.text, 'user');
+        checks.textPayload = typeof payload.messages[0].content === 'string' && payload.messages[0].content.includes(marker) && payload.messages[0].content.includes('OM_DIAGNOSTIC_MESSAGE');
+        injectPlannedImages(payload, plan.imageBlocks);
+        checks.imagePayload = Array.isArray(payload.messages[0].content) && payload.messages[0].content.some(function (block) { return block.type === 'image_url' && block.image_url.url === image; });
+        var context = { messages: [{ role: 'user', content: 'test' }] }; injectText(context, marker, 'context');
+        checks.contextPayload = context.messages[0].role === 'system' && context.messages[0].content === marker;
+        var legacy = { prompt: 'OM_DIAGNOSTIC_MESSAGE' }; injectText(legacy, marker, 'user'); checks.promptPayload = legacy.prompt.includes(marker) && legacy.prompt.includes('OM_DIAGNOSTIC_MESSAGE');
+        return { status: Object.keys(checks).every(function (name) { return checks[name]; }) ? 'pass' : 'attention', checks: checks, trace: [] };
+    } catch (error) { return { status: 'attention', checks: checks, trace: diagnosticFrames(error) }; }
 }

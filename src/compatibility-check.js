@@ -5,8 +5,12 @@ import { DB, STORE_NAME, isPluginVersionAtLeast, MIN_SERVER_PLUGIN_VERSION } fro
 import { getChatContext, getChatState, getWardrobeView, getBoundPresetId } from './chat-state.js';
 import { OM_VERSION } from './version.js';
 import { diagnosticErrorKind, getCompatibilityRecord, safeExtensionId } from './compatibility-journal.js';
-import { getCompatibilityHookState, probeCompatibilityFetch } from './compatibility-probe.js';
+import { getCompatibilityHookState, inspectCompatibilityFetch } from './compatibility-probe.js';
 import { getRuntimeErrors } from './runtime-errors.js';
+import { probeClickRoute, probeOcclusion, probeStyleImpact } from './compatibility-functional.js';
+import { buildCompatibilityRelations, compareCompatibilityBaseline } from './compatibility-relations.js';
+import { runInjectionSelfTest } from './inject.js';
+import { explainRuntimeError } from './runtime-error-reasons.js';
 
 function version(value) { return typeof value === 'string' && /^\d+\.\d+(?:\.\d+)?(?:[-+][A-Za-z0-9.-]+)?$/.test(value) && value.length < 50 ? value : null; }
 function count(value) { return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.round(value)) : null; }
@@ -127,6 +131,7 @@ async function extensions(context, signal) {
             }
         }
     }));
+    rows.forEach(function (item) { item.current = item.id === currentId; });
     return { items: rows, complete: discovered && !truncated && cursor >= targets.length, currentId: currentId };
 }
 
@@ -164,24 +169,30 @@ export async function collectCompatibilityReport(options) {
     var context = getChatContext(), signal = options.signal, checks = [], hooks = getCompatibilityHookState();
     var report = { schemaVersion: 1, extensionVersion: OM_VERSION, generatedAt: new Date().toISOString(), environment: environment(), checks: checks, extensions: [], inventoryComplete: false,
         runtime: { fetchProbe: 'unknown', hooks: hooks }, storage: {}, recording: null, summary: { pass: 0, attention: 0, unknown: 0 },
-        scope: '手动检查当前可验证的异常，不能识别所有扩展冲突，也不对扩展作因果归因。报告不包含衣柜内容、聊天正文、API 配置、原始错误正文或完整访问地址。' };
+        scope: '把可验证的干扰归属到本次离线、合成交互或样式测试；不能识别所有真实功能冲突。调用栈与停用对照只作线索，不单独证明根因。报告不包含衣柜内容、聊天正文、API 配置、原始错误正文或完整访问地址。' };
     var required = [['fetch', typeof window.fetch === 'function'], ['IndexedDB', typeof indexedDB !== 'undefined'], ['MutationObserver', typeof MutationObserver === 'function'], ['AbortController', typeof AbortController === 'function'], ['Response', typeof Response === 'function']];
     var missing = required.filter(function (item) { return !item[1]; }).map(function (item) { return item[0]; });
     checks.push(row('browser-apis', missing.length ? 'attention' : 'pass', '浏览器能力', missing.length ? '缺少能力：' + missing.join('、') : '关键浏览器能力可用。'));
     checks.push(row('chat-events', context && context.eventSource && typeof context.eventSource.on === 'function' ? 'pass' : 'unknown', '宿主聊天事件', context && context.eventSource && typeof context.eventSource.on === 'function' ? '可访问宿主的聊天事件接口。' : '当前没有可确认的聊天事件接口；可进入聊天后重试。'));
     var jobs = await Promise.allSettled([
-        extensions(context, signal), probeCompatibilityStorage(signal), probeCompatibilityFetch(), mutationProbe(), readJson('/version', signal), readJson('/api/plugins/outfit-manager/status', signal),
+        extensions(context, signal), probeCompatibilityStorage(signal), inspectCompatibilityFetch(), mutationProbe(), readJson('/version', signal), readJson('/api/plugins/outfit-manager/status', signal),
         timeout(navigator.storage && typeof navigator.storage.estimate === 'function' ? navigator.storage.estimate() : Promise.resolve(null), 1800, null)
     ]);
     function value(index, fallback) { return jobs[index].status === 'fulfilled' ? jobs[index].value : fallback; }
-    var inventory = value(0, { items: [], complete: false }), local = value(1, { ok: false, reason: 'unknown' }), probe = value(2, 'blocked'), mutations = value(3, 'failed'), host = value(4, { ok: false }), server = value(5, { ok: false }), estimate = value(6, null);
+    var fetchInspection = value(2, { outer: { status: 'blocked', trace: [] }, direct: { status: 'unavailable', trace: [] }, outerDiffers: false });
+    var inventory = value(0, { items: [], complete: false }), local = value(1, { ok: false, reason: 'unknown' }), probe = fetchInspection.outer.status, mutations = value(3, 'failed'), host = value(4, { ok: false }), server = value(5, { ok: false }), estimate = value(6, null);
     report.extensions = inventory.items; report.inventoryComplete = !!inventory.complete; report.runtime.fetchProbe = probe;
+    report.observations = { fetch: fetchInspection };
+    var overlay = document.querySelector('.om-overlay'), theme = ['sakura', 'y2k', 'dopamine', 'memphis', 'minimal'].find(function (name) { return overlay && overlay.classList.contains('om-theme-' + name); });
+    report.appearance = { theme: theme || 'unknown', dark: !!(overlay && overlay.classList.contains('om-dark')), layout: innerWidth <= 600 ? 'mobile' : 'desktop' };
     var copies = inventory.items.filter(function (item) { return item.outfitManager && item.enabled !== false && item.scriptLoaded; });
     checks.push(row('extension-copies', copies.length > 1 ? 'attention' : inventory.complete ? 'pass' : 'unknown', '穿搭副本', copies.length > 1 ? '发现多个已加载的穿搭副本。' : inventory.complete ? '未发现多个已加载的穿搭副本。' : '扩展清单不完整，不能排除重复副本。', copies.length > 1 ? '在扩展管理中保留一个穿搭副本后完整刷新；本检查不会自动停用扩展。' : ''));
     var current = inventory.items.find(function (item) { return item.id === inventory.currentId; });
     checks.push(row('frontend-version', current && current.version ? current.version === OM_VERSION ? 'pass' : 'attention' : 'unknown', '前端版本', current && current.version ? current.version === OM_VERSION ? '页面运行版本与安装文件版本一致。' : '页面运行版本与安装文件版本不同。' : '未能读取安装文件的版本。', current && current.version !== OM_VERSION ? '完整刷新或重启宿主，避免更新后仍运行缓存旧文件。' : ''));
-    var fetchStatus = probe === 'observed' ? 'pass' : probe === 'unavailable' || probe === 'not-observed' ? 'attention' : 'unknown';
-    checks.push(row('fetch-chain', fetchStatus, '请求处理链', probe === 'observed' ? '无联网探针已到达穿搭处理器，没有调用生成接口。' : probe === 'not-observed' ? '本次探针未到达穿搭处理器；可能被覆盖，也可能是外层处理器未透传检测参数。' : '探针不可用、超时或受浏览器策略限制，未确认请求链。', fetchStatus === 'attention' ? '先完整刷新，再开启复现记录；仅凭此项不能确定是哪个扩展造成。' : ''));
+    var fetchStatus = probe === 'observed' ? 'pass' : fetchInspection.outerDiffers || probe === 'unavailable' || probe === 'not-observed' ? 'attention' : 'unknown';
+    checks.push(row('fetch-chain', fetchStatus, '请求处理链', probe === 'observed' ? '无联网探针已到达穿搭处理器，没有调用生成接口。' : probe === 'not-observed' ? '本次探针未到达穿搭处理器；可能被覆盖，也可能是外层处理器未透传检测参数。' : probe === 'blocked' && fetchInspection.outerDiffers ? '全局入口的离线探针抛错，直接调用穿搭处理器则通过。可查看首个外部脚本位置；结论限于本次探针。' : '探针不可用、超时或受浏览器策略限制，未确认请求链。', fetchStatus === 'attention' ? '先完整刷新，再开启复现记录；仅凭此项不能确定真实生成请求是否失效。' : ''));
+    var transport = fetchInspection.transport || { status: 'unavailable', trace: [], errorTrace: [] };
+    checks.push(row('fetch-transport', transport.status === 'pass' ? 'pass' : transport.status === 'modified' ? 'attention' : 'unknown', '完整离线请求读回', transport.status === 'pass' ? '数据 URL 经过当前请求链后能正确读回；参数读取时出现的组件会记为参与来源，没有访问模型接口。' : transport.status === 'modified' ? '离线数据经过请求链后与原值不同；可能被改写或替换，需要对照排查。' : '离线读回受阻或超时，可能是浏览器策略或请求处理器行为，无法单独归因。'));
     checks.push(row('xhr-hooks', hooks.xhrCurrent ? 'pass' : 'unknown', '旧式请求处理器', hooks.xhrCurrent ? '当前旧式请求入口仍是本实例安装的处理器。' : '入口外层可能有其他处理器，静态检查无法确认串联关系。'));
     checks.push(row('completion-hook', hooks.completion ? 'pass' : 'unknown', '聊天参数事件', hooks.completion ? '穿搭已注册参数准备事件；本检查不会触发真实聊天事件。' : '没有确认到本实例的参数事件注册。'));
     checks.push(row('mutation-observer', mutations === 'observed' ? 'pass' : mutations === 'failed' || mutations === 'missing' ? 'attention' : 'unknown', '页面变化监听', mutations === 'observed' ? '离屏测试节点的变化能正常传达。' : '未确认到页面变化通知；不代表已确认扩展冲突。'));
@@ -207,9 +218,17 @@ export async function collectCompatibilityReport(options) {
         checks.push(row('chat-view', mismatch || invalid ? 'attention' : part ? 'pass' : 'unknown', '聊天与衣柜归属', mismatch || invalid ? '浏览归属或勾选引用存在不一致。' : part ? '当前聊天的浏览归属与勾选引用一致。' : '当前衣柜尚未载入，跳过勾选引用检查。', mismatch || invalid ? '等待聊天切换结束后再查一次；可用数据体检检查失效引用。' : ''));
     }
     checks.push.apply(checks, await settledUiChecks(options.targetId, signal));
+    if (!(signal && signal.aborted)) {
+        var control = options.targetId && document.getElementById(options.targetId), click = probeClickRoute(control), style = probeStyleImpact(control), occlusion = probeOcclusion(control, report.extensions), injection = runInjectionSelfTest();
+        report.observations.click = click; report.observations.style = style; report.observations.occlusion = occlusion; report.observations.injection = injection;
+        checks.push(row('click-route', click.status, '穿搭点击传递', click.reached ? '合成点击已到达穿搭测试按钮；这项测试不等同于全部真实用户手势。' : click.status === 'attention' ? '合成点击没有到达穿搭测试按钮，已记录可观察的阻止传播位置。' : '未能完成交互测试。', click.status === 'attention' ? '查看下方按组件归属的证据，并在保留聊天后逐一停用对照。' : ''));
+        checks.push(row('css-impact', style.status, '穿搭样式干扰', style.status === 'pass' ? '检测按钮的尺寸、可见性和点击样式正常。' : style.verified.length ? '通过即时移除／还原声明，验证了 ' + style.verified.length + ' 条使检测按钮受限的样式；已还原。' : '按钮存在样式限制，但本次未确认单条样式来源。', style.status === 'attention' ? '查看样式归属证据；无法读取的跨域样式和多条叠加限制仍可能需要对照。' : ''));
+        var selfNames = { currentOutfit: '当前穿搭筛选', chatIsolation: '空聊天隔离', budget: '内容预算', textPayload: '文字写入', imagePayload: '图片写入', contextPayload: '上下文写入', promptPayload: '旧式提示词写入' };
+        checks.push(row('injection-selftest', injection.status, '穿搭注入功能自检', injection.status === 'pass' ? '使用合成衣服验证了筛选、隔离、预算及请求内容写入；未发送请求或修改真实衣柜。' : '本地合成数据测试未通过：' + Object.keys(selfNames).filter(function (name) { return !injection.checks[name]; }).map(function (name) { return selfNames[name]; }).join('、'), injection.status === 'attention' ? '这说明本地功能异常，单靠此项无法判断是穿搭自身问题还是外部修改。' : ''));
+    }
     report.recording = getCompatibilityRecord();
     var runtimeErrors = getRuntimeErrors(), errorEntries = runtimeErrors.data.entries;
-    report.runtime.errorLog = { enabled: runtimeErrors.data.enabled, persistence: runtimeErrors.persistence, stored: errorEntries.length, suppressed: runtimeErrors.data.suppressed, recent: errorEntries.slice(-20) };
+    report.runtime.errorLog = { enabled: runtimeErrors.data.enabled, persistence: runtimeErrors.persistence, stored: errorEntries.length, suppressed: runtimeErrors.data.suppressed, recent: errorEntries.slice(-20).map(function (entry) { return Object.assign({}, entry, { analysis: explainRuntimeError(entry) }); }) };
     checks.push(row('runtime-error-log', errorEntries.length || !runtimeErrors.persistence ? 'attention' : runtimeErrors.data.enabled ? 'pass' : 'unknown', '运行错误日志',
         errorEntries.length ? '最近 7 天保留 ' + errorEntries.length + ' 条穿搭错误记录（重复合并），不代表当前存在扩展冲突。' : runtimeErrors.data.enabled ? '暂未记录到可归属穿搭的运行错误。' : '日常错误记录已暂停，不能据此判断运行正常。',
         !runtimeErrors.persistence ? '本机日志保存不可用，刷新后可能丢失；可在运行错误日志中直接导出。' : errorEntries.length ? '到设置 → 调试 → 运行错误日志查看分类与文件位置。' : ''));
@@ -221,6 +240,8 @@ export async function collectCompatibilityReport(options) {
     if (errors) checks.push(row('recorded-errors', 'attention', '复现期间错误', '记录到 ' + errors + ' 次脚本或资源错误；报告仅保留分类和扩展来源标签。', '来源标签不能证明错误由该扩展造成，也不能证明它与导入失败有关。'));
     if (report.environment.heapMiB != null && report.environment.heapLimitMiB) checks.push(row('memory', report.environment.heapMiB > report.environment.heapLimitMiB * 0.8 ? 'attention' : 'pass', '脚本内存', '当前脚本堆约 ' + report.environment.heapMiB + ' / ' + report.environment.heapLimitMiB + ' MiB；不包含全部图片与系统内存。'));
     checks.forEach(function (item) { report.summary[item.status]++; });
+    report.relations = buildCompatibilityRelations(report);
+    report.comparison = compareCompatibilityBaseline(report);
     return report;
 }
 

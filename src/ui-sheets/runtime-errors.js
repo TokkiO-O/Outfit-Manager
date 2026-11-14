@@ -4,10 +4,16 @@
 import { getRuntimeErrors, setRuntimeErrorsEnabled, clearRuntimeErrors, subscribeRuntimeErrors, runtimeErrorOperation, runtimeErrorSummary, exportRuntimeErrors } from '../runtime-errors.js';
 import { esc, toast } from '../utils.js';
 import { createSheet, closeSheet } from './sheet-base.js';
+import { explainRuntimeError } from '../runtime-error-reasons.js';
+import { diagnosticSourceLabel } from '../diagnostic-evidence.js';
 
 function date(value) { try { return new Date(value).toLocaleString(); } catch (ignored) { return '时间未确认'; } }
 var kinds = { handled: '功能失败', uncaught: '脚本异常', rejection: '未处理的异步异常', resource: '资源加载失败' };
-function rowKey(item) { return JSON.stringify([item.kind, item.operation, item.code, item.name, item.version, item.httpStatus, item.frames]); }
+function rowKey(item) { return JSON.stringify([item.kind, item.operation, item.code, item.name, item.version, item.httpStatus, item.frames, item.hint, item.related]); }
+function explanation(item) {
+    var value = explainRuntimeError(item);
+    return '<div class="om-error-analysis"><p><strong>已确认：</strong>' + esc(value.confirmed) + '</p><p><strong>可能原因：</strong>' + value.possible.map(esc).join('；') + '</p><strong>建议处理：</strong><ol>' + value.steps.map(function (step) { return '<li>' + esc(step) + '</li>'; }).join('') + '</ol><p class="om-hint">' + esc(value.relation) + '</p></div>';
+}
 
 export function openRuntimeErrorsSheet() {
     var shown = 20, unsubscribe;
@@ -35,7 +41,8 @@ export function openRuntimeErrorsSheet() {
             var key = rowKey(item);
             return '<details class="om-compat-check" data-status="attention" data-log-key="' + esc(key) + '"' + (opened.has(key) ? ' open' : '') + '><summary><span><small>' + esc(date(item.lastAt)) + '</small><strong>' + esc(runtimeErrorOperation(item.operation) + ' · ' + runtimeErrorSummary(item)) + '</strong></span><span class="om-compat-badge">' + item.count + ' 次</span></summary>' +
                 '<p>' + esc(kinds[item.kind] + ' · ' + item.name + ' · ' + item.code + ' · v' + (item.version || '未知')) + '</p><p class="om-hint">首次：' + esc(date(item.firstAt)) + '；最近：' + esc(date(item.lastAt)) + '</p>' +
-                (item.frames.length ? '<ul class="om-runtime-frames">' + item.frames.map(function (frame) { return '<li><code>' + esc(frame.file + (frame.line ? ':' + frame.line + (frame.column ? ':' + frame.column : '') : '')) + '</code></li>'; }).join('') + '</ul>' : '<p class="om-hint">没有可归属的扩展内文件位置。</p>') + '</details>';
+                explanation(item) + (item.frames.length ? '<ul class="om-runtime-frames">' + item.frames.map(function (frame) { return '<li><code>' + esc(frame.file + (frame.line ? ':' + frame.line + (frame.column ? ':' + frame.column : '') : '')) + '</code></li>'; }).join('') + '</ul>' : '<p class="om-hint">没有可归属的扩展内文件位置。</p>') +
+                (item.related.length ? '<p><strong>关联调用位置（不等于原因）：</strong></p><ul class="om-runtime-frames">' + item.related.map(function (frame) { return '<li>' + esc(diagnosticSourceLabel(frame)) + ' · <code>' + esc(frame.file + ':' + frame.line + ':' + frame.column) + '</code></li>'; }).join('') + '</ul>' : '') + '</details>';
         }).join('') : '<p class="om-hint" id="om-runtime-empty">' + (filter === 'all' ? '暂无已记录的运行错误。' : '这个范围暂无错误。') + '</p>';
         sheet.querySelector('#om-runtime-more').hidden = entries.length <= shown;
         sheet.querySelector('#om-runtime-clear').disabled = !log.entries.length && !log.suppressed;
