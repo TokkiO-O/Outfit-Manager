@@ -9,6 +9,8 @@ import { ensurePartitionLoaded } from './db/index.js';
 import { fn } from './bridge.js';
 import { normalizeGarmentParagraph } from './description-format.js';
 import { captureRuntimeError } from './runtime-errors.js';
+import { diagnosticBoot } from './diagnostic-policy.js';
+import { recordDiagnosticModelBlock } from './diagnostic-network.js';
 
 // ── 端点规范化（兼容 OpenAI / 中转站 / 火山方舟 Ark）────────
 export function normalizeEndpoint(raw, path) {
@@ -236,6 +238,7 @@ export function callViaStProxy(apiCfg, messages, maxTokens, cb, requestOptions) 
 
 /** 优先 ST 代理，失败再尝试浏览器直连 */
 export function callChatCompletions(apiCfg, messages, maxTokens, cb, requestOptions) {
+    if (diagnosticBoot.sandbox) { recordDiagnosticModelBlock(); cb('隔离排查不执行真实模型生成'); return; }
     requestOptions = requestOptions || {};
     var callback = cb;
     cb = function (error, text, raw) {

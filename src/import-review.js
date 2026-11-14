@@ -15,6 +15,7 @@ import { prepareImportMedia } from './import-media.js';
 import { planImportAsync } from './import-planner.js';
 import { createImportProgress } from './import-progress.js';
 import { wardrobeContentOnly } from './wardrobe-transfer.js';
+import { diagnosticBoot } from './diagnostic-policy.js';
 
 function comparable() {
     var parts={};
@@ -23,7 +24,9 @@ function comparable() {
 }
 export async function reviewImport(source,mode,options) {
     options=options||{};
-    if(DB.serverInitFailed||DB.syncConflict){if(options.job)options.job.cancel();toast('请先处理保存或同步冲突，再导入备份',true);return;}
+    var diagnostic = diagnosticBoot.sandbox && options.diagnostic === true, reported = false;
+    function report(value) { if (diagnostic && !reported && typeof options.onResult === 'function') { reported = true; options.onResult(value); } }
+    if(DB.serverInitFailed||DB.syncConflict){report({ok:false,error:new Error('SAVE_FAILED')});if(options.job)options.job.cancel();toast('请先处理保存或同步冲突，再导入备份',true);return;}
     var job=options.job||createImportProgress();if(!job)return;
     var target=options.targetUserKey||currentUserPartKey(),keys=Object.keys(DB.knownPartKeys);
     try{
@@ -45,7 +48,7 @@ export async function reviewImport(source,mode,options) {
                 '<p>新增 '+count.added+' · 更新 '+count.updated+' · 完全重复 '+count.skipped+' · 同名或同图保留 '+count.related+'</p><p class="om-hint">仅导入衣服、单品、图片、分类和搭配关系；备份中的 API、个人设置与聊天选择均忽略。</p>'+
                 (mode==='replace'?'<p class="om-feature-notice">将替换目标衣柜中的 '+count.removed+' 条原记录；其他衣柜和聊天穿着不受覆盖。</p>':'<p class="om-hint">同名、同图或图片相似均不会被当作同一套衣服自动丢弃。</p>')+
                 '<div id="om-import-rows" class="om-import-scroll"></div><div id="om-import-pages"></div><p id="om-import-save-status" role="status"></p><div class="om-edit-foot om-import-footer"><button type="button" class="om-btn om-btn-safe" id="om-import-confirm">确认导入</button><button type="button" class="om-btn om-btn-outline" id="om-import-cancel">取消</button></div></div>',
-                {modal:true,medium:true,onClose:function(){if(committed)job.release();else job.cancel();}});
+                {modal:true,medium:true,onClose:function(){if(committed)job.release();else { report({ok:false,cancelled:true}); job.cancel(); }}});
             var page=0,size=40;
             sheet.querySelector('.om-sheet').classList.add('om-import-review');
             function renderRows(){
@@ -84,14 +87,16 @@ export async function reviewImport(source,mode,options) {
                         applyChatContext();scheduleServerPutKey('meta');
                     });
                     if(fn.renderViewbar)fn.renderViewbar();if(fn.requestWardrobeRefresh)fn.requestWardrobeRefresh();
-                    job.note('complete');notifyChat();closeSheet(sheet);toast('导入完成：新增 '+count.added+'，更新 '+count.updated+'，完全重复跳过 '+count.skipped);
+                    job.note('complete');notifyChat();closeSheet(sheet);report({ok:true,counts:count});toast('导入完成：新增 '+count.added+'，更新 '+count.updated+'，完全重复跳过 '+count.skipped);
                 }catch(failure){
+                    report({ok:false,error:failure});
                     job.fail(failure);
                     toast(failure.message,true);sheet.querySelector('#om-import-save-status').textContent=failure.message;
                     this.disabled=false;this.textContent='确认导入';sheet.querySelector('#om-import-cancel').disabled=false;
                 }finally{committing=false;}
             };
+            if(diagnostic && typeof options.onPreview === 'function') options.onPreview(sheet,plan);
             return plan;
         });
-    }catch(error){job.fail(error);job.cancel();toast('导入已停止：'+error.message,true);return null;}
+    }catch(error){report({ok:false,error:error});job.fail(error);job.cancel();toast('导入已停止：'+error.message,true);return null;}
 }

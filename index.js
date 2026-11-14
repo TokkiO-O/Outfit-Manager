@@ -15,8 +15,11 @@ import { installDiagnostics } from './src/diagnose.js';
 import { installFeatures, refreshSyncBadge } from './src/ui-features.js';
 import { initializeCompatibilityJournal } from './src/compatibility-journal.js';
 import { initializeRuntimeErrors, captureRuntimeError } from './src/runtime-errors.js';
+import { initializeDiagnosticWizard, beforeDiagnosticStorage, afterDiagnosticStorage } from './src/diagnostic-wizard.js';
+import { diagnosticBoot } from './src/diagnostic-policy.js';
 
 initializeRuntimeErrors();
+initializeDiagnosticWizard();
 
 // ── 注册跨模块函数 ─────────────────────────────────────
 registerMainFn();
@@ -108,7 +111,7 @@ function handleStorageInitialization(err) {
 
 // 性能自检：启动耗时 + 缓存规模。卡的时候看一眼控制台就能知道是不是加载太重。
 var bootT0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-initStorage(function (err) {
+beforeDiagnosticStorage().then(function (allowed) { if (!allowed) return; initStorage(function (err) {
     try {
         var ms = Math.round(((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) - bootT0);
         var st = getCacheStats();
@@ -117,5 +120,6 @@ initStorage(function (err) {
             ' · 穿搭 ' + st.outfits + ' 套 · 带图 ' + st.images + ' 张 · 角色 ' + st.chars +
             ' · ' + (window.__omPerf.serverMode ? '后端模式' : '本地模式') + ' · 性能补丁 7');
     } catch (ePerf) {}
-    handleStorageInitialization(err || null);
-});
+    if (!err || !diagnosticBoot.sandbox) handleStorageInitialization(err || null);
+    afterDiagnosticStorage(err || null);
+}); }).catch(function (error) { captureRuntimeError(error, { operation: 'startup', source: 'src/diagnostic-wizard.js' }); });

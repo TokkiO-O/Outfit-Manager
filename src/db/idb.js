@@ -3,12 +3,15 @@
 
 import { DB, DB_NAME, DB_VERSION, STORE_NAME } from './state.js';
 import { captureRuntimeError } from '../runtime-errors.js';
+import { diagnosticBoot, diagnosticWritesAllowed } from '../diagnostic-policy.js';
+import { diagnosticImageGet, diagnosticImagePut, diagnosticImageKeys } from '../diagnostic-store.js';
 
 // ══════════════════════════════════════════════════════════
 //  IndexedDB 底层
 // ══════════════════════════════════════════════════════════
 
 export function openDB(cb) {
+    if (diagnosticBoot.sandbox && !diagnosticWritesAllowed()) { cb(null); return; }
     if (DB.dbInstance) { cb(DB.dbInstance); return; }
     var req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = function (e) {
@@ -21,6 +24,7 @@ export function openDB(cb) {
 
 // 通用：读单个 key
 export function idbGet(key, cb) {
+    if (diagnosticBoot.sandbox && typeof key === 'string' && key.startsWith('image:')) { diagnosticImageGet(key).then(function (value) { cb(value, null); }, function (error) { cb(null, error); }); return; }
     var finished = false;
     function done(value, error) { if (!finished) { finished = true; cb(value, error || null); } }
     try { openDB(function (db) {
@@ -49,7 +53,7 @@ export function idbGetOrCreate(key, fallback, cb) {
             var req = store.get(key);
             req.onsuccess = function () {
                 value = req.result;
-                if (value === undefined) { value = fallback; created = true; store.put(value, key); }
+                if (value === undefined) { if (!diagnosticWritesAllowed()) { done(null, new Error('检测期间原衣柜暂时只读')); tx.abort(); return; } value = fallback; created = true; store.put(value, key); }
             };
         } catch (error) { done(null, error); }
     }); } catch (error) { done(null, error); }
@@ -57,7 +61,10 @@ export function idbGetOrCreate(key, fallback, cb) {
 
 // 通用：写单个 key
 export function idbPut(key, value, cb) {
+    if (!diagnosticWritesAllowed()) { if (cb) cb(false); return; }
+    if (diagnosticBoot.sandbox && typeof key === 'string' && key.startsWith('image:')) { diagnosticImagePut([{ key: key, value: value }]).then(function () { if (cb) cb(true); }, function () { if (cb) cb(false); }); return; }
     openDB(function (db) {
+        if (!diagnosticWritesAllowed()) { if (cb) cb(false); return; }
         if (!db) { if (cb) cb(false); return; }
         var tx = db.transaction(STORE_NAME, 'readwrite');
         tx.objectStore(STORE_NAME).put(value, key);
@@ -68,7 +75,9 @@ export function idbPut(key, value, cb) {
 
 // 通用：删除单个 key
 export function idbDelete(key, cb) {
+    if (!diagnosticWritesAllowed()) { if (cb) cb(false); return; }
     openDB(function (db) {
+        if (!diagnosticWritesAllowed()) { if (cb) cb(false); return; }
         if (!db) { if (cb) cb(false); return; }
         var tx = db.transaction(STORE_NAME, 'readwrite');
         tx.objectStore(STORE_NAME).delete(key);
@@ -79,9 +88,15 @@ export function idbDelete(key, cb) {
 
 // 通用：批量写多个 key（同一事务）
 export function idbPutBatch(entries, cb) {
+    if (!diagnosticWritesAllowed()) { if (cb) cb(false); return; }
+    if (diagnosticBoot.sandbox && entries.some(function (entry) { return entry.key.startsWith('image:'); })) {
+        var assets = entries.filter(function (entry) { return entry.key.startsWith('image:'); }), records = entries.filter(function (entry) { return !entry.key.startsWith('image:'); });
+        diagnosticImagePut(assets).then(function () { if (records.length) idbPutBatch(records, cb); else if (cb) cb(true); }, function () { if (cb) cb(false); }); return;
+    }
     var finished = false;
     function done(ok) { if (!finished) { finished = true; if (!ok) captureRuntimeError(new Error('本地批量写入失败'), { operation: 'save', source: 'src/db/idb.js' }); if (cb) cb(ok); } }
     try { openDB(function (db) {
+        if (!diagnosticWritesAllowed()) { done(false); return; }
         if (!db) { done(false); return; }
         var tx = db.transaction(STORE_NAME, 'readwrite'), store = tx.objectStore(STORE_NAME);
         tx.oncomplete = function () { done(true); };
@@ -99,7 +114,7 @@ export function idbGetAllKeys(cb) {
         var store = tx.objectStore(STORE_NAME);
         if (store.getAllKeys) {
             var req = store.getAllKeys();
-            req.onsuccess = function () { cb(req.result || []); };
+            req.onsuccess = function () { var keys = req.result || []; if (diagnosticBoot.sandbox) diagnosticImageKeys().then(function (assets) { cb(Array.from(new Set(keys.concat(assets)))); }, function () { cb(keys); }); else cb(keys); };
             req.onerror = function () { cb([]); };
         } else {
             // fallback for older browsers
@@ -108,7 +123,7 @@ export function idbGetAllKeys(cb) {
             cursor.onsuccess = function (e) {
                 var c = e.target.result;
                 if (c) { keys.push(c.key); c.continue(); }
-                else cb(keys);
+                else if(diagnosticBoot.sandbox)diagnosticImageKeys().then(function(assets){cb(Array.from(new Set(keys.concat(assets))));},function(){cb(keys);});else cb(keys);
             };
             cursor.onerror = function () { cb(keys); };
         }

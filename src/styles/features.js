@@ -21,5 +21,6 @@ export var FEATURE_CSS = `
 .om-grid .om-lazy-img{transition:none!important}
 #om-budget-text,#om-budget-images,#om-budget-candidates{width:100px;max-width:45%;box-sizing:border-box}
 [data-om-sync-label][data-status="error"],[data-om-sync-label][data-status="conflict"]{color:#e58c55}
+.om-investigation #om-investigation-targets{max-height:220px;overflow:auto;border-block:1px solid rgba(127,127,127,.2);padding-block:5px}.om-investigation select,.om-investigation input[type=file]{width:100%}.om-investigation input::file-selector-button{font:inherit;color:inherit;background:rgba(127,127,127,.1);border:1px solid rgba(127,127,127,.3);border-radius:7px;padding:6px 8px;margin-right:8px}.om-investigation a{color:inherit;text-decoration:underline}
 @media(max-width:550px){.om-feature-diff{grid-template-columns:1fr}.om-feature-content .om-btn{font-size:12px;padding:7px 9px}}
 `;

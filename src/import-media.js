@@ -5,14 +5,22 @@ import { DB, IMAGE_URL_PREFIX } from './db/state.js';
 import { uploadImage } from './db/images.js';
 import { createLocalImageWriter, isLocalImage, hasLocalImage, resolveLocalImageData } from './db/local-images.js';
 import { checkCancelled, yieldImport } from './json-data.js';
+import { diagnosticBoot } from './diagnostic-policy.js';
+import { diagnosticStoreGet, diagnosticStorePut } from './diagnostic-store.js';
 
 export async function prepareImportMedia(source, base, options) {
     options=options||{};var signal=options.signal, local=!DB.serverMode, writer=local?createLocalImageWriter(signal):null;
     var assets=source._assets||{}, manifest=source._backupManifest, names=Object.keys(assets), done=0;
+    if(diagnosticBoot.sandbox && !local) {
+        var parts=[source,source.preset].concat(Object.values(source.chars||{}),source.presets||[]);
+        parts.forEach(function(part){if(part)['outfits','accessories'].forEach(function(kind){(part[kind]||[]).forEach(function(item){if(typeof item.imageData==='string'&&item.imageData.startsWith('/api/plugins/outfit-manager/images/'))item.imageData=IMAGE_URL_PREFIX+item.imageData.slice('/api/plugins/outfit-manager/images/'.length);});});});
+    }
     if(manifest&&(manifest.version!==1||!Array.isArray(manifest.images)||manifest.images.length!==manifest.imageCount))throw new Error('备份图片清单无效');
     if(manifest&&manifest.images.some(function(name){return !Object.prototype.hasOwnProperty.call(assets,name);}))throw new Error('备份缺少图片，请从原酒馆重新完整导出');
     async function store(value) {
         checkCancelled(signal);
+        var cacheKey = diagnosticBoot.sandbox && !local && isLocalImage(value) ? 'upload:' + value : null;
+        if(cacheKey) { var cached=await diagnosticStoreGet(diagnosticBoot.jobId,cacheKey); if(typeof cached==='string'&&/^[a-f0-9]{40}\.(jpg|png|webp|gif|bmp)$/.test(cached))return IMAGE_URL_PREFIX+cached; }
         if(isLocalImage(value)){
             if(!await hasLocalImage(value))throw new Error('备份引用的本地图片缺失，请重新导入包含图片的完整备份');
             if(local)return value;value=await resolveLocalImageData(value);
@@ -21,6 +29,7 @@ export async function prepareImportMedia(source, base, options) {
         if(local)return writer.write(value);
         var result=await new Promise(function(resolve,reject){uploadImage(value,function(error,url){if(error)reject(new Error(error));else resolve(url);});});
         if(!result||result.indexOf(IMAGE_URL_PREFIX)!==0)throw new Error('图片上传未完成，已停止导入；原衣柜保持原样');
+        if(cacheKey)await diagnosticStorePut(diagnosticBoot.jobId,[{key:cacheKey,value:result.slice(IMAGE_URL_PREFIX.length)}]);
         return result;
     }
     // Bounded batches rather than thousands of simultaneous upload requests.

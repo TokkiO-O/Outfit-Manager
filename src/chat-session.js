@@ -2,20 +2,21 @@
 // 基于温水 & 克洛宜原作维护；保留原作署名与数据兼容。
 
 import { idbGet, idbPut } from './db/idb.js';
+import { diagnosticBoot, diagnosticChatContext, diagnosticChatPrefix, diagnosticWritesAllowed } from './diagnostic-policy.js';
 
 export var CHAT_STATE_KEY = 'outfitManagerChatV3';
 var sessions = new Map(), metadataOwners = new WeakMap(), hydrated = new Set(), pendingHost = new Set();
 var clone = function (value) { return JSON.parse(JSON.stringify(value)); };
-var storagePrefix = 'om_chat_state_v4:';
+var storagePrefix = diagnosticChatPrefix();
 export function getChatContext() {
     try {
-        var context = SillyTavern.getContext();
+        var context = diagnosticChatContext(SillyTavern.getContext());
         return context && context.chatMetadata && typeof context.chatMetadata === 'object' && getChatIdentity(context) ? context : null;
     } catch (error) { return null; }
 }
 export function getChatIdentity(context) {
     try {
-        context = context || SillyTavern.getContext();
+        context = context || diagnosticChatContext(SillyTavern.getContext());
         var id = typeof context.getCurrentChatId === 'function' ? context.getCurrentChatId() : context.chatId;
         if (id == null || id === '') return '';
         var group = context.groupId !== null && context.groupId !== undefined && context.groupId !== '' && context.groupId !== false;
@@ -74,6 +75,7 @@ export function attachSession(context, value) {
     var snapshot = clone(value); context.chatMetadata[CHAT_STATE_KEY] = snapshot; metadataOwners.set(snapshot, value.chatKey);
 }
 export function persistSession(value) {
+    if (!diagnosticWritesAllowed()) return Promise.resolve(false);
     value.updatedAt = Math.max(Date.now(), Number(value.updatedAt || 0) + 1);
     var snapshot = clone(value), localOK = false;
     pendingHost.add(value.chatKey);

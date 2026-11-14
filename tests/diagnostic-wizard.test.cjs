@@ -1,0 +1,45 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {pathToFileURL}=require('node:url');
+const path=require('node:path');
+(async()=>{
+    const m=await import(pathToFileURL(path.join(__dirname,'../src/diagnostic-job.js')));
+    const a='third-party/Test-A',b='third-party/Test-B';
+    const make=targets=>m.sanitizeDiagnosticJob({schemaVersion:1,id:'a'.repeat(32),owner:'b'.repeat(32),phase:'running',mode:'import',storage:'local',targets,originalDisabled:['third-party/Was-Off'],versions:{[a]:'1.0.0'},results:[],apiKey:'DO_NOT_EXPORT',fileName:'private.json',serverSession:'c'.repeat(32)});
+    const push=(job,step,outcome,extra={})=>{job.step=step.index||0;job.suspect=step.suspect||job.suspect;job.results.push({purpose:step.purpose,enabled:step.enabled,outcome,stage:'saving',kind:'quota',code:'SAVE_FAILED',collateral:[],...extra});return m.nextDiagnosticStep(job);};
+    let job=make([a]),step=m.nextDiagnosticStep(job);
+    step=push(job,step,'fail');assert.equal(step.purpose,'group-off');
+    step=push(job,step,'pass');assert.deepEqual(step.enabled,[a]);
+    step=push(job,step,'fail');assert.equal(step.purpose,'confirm-off');
+    step=push(job,step,'pass');assert.equal(step.purpose,'confirm-on');
+    step=push(job,step,'fail');assert.equal(step.conclusion,'reproduced');
+    job=make([a,b]);step=m.nextDiagnosticStep(job);
+    for(const outcome of ['fail','pass','pass','fail','pass','fail'])step=push(job,step,outcome);
+    assert.equal(step.conclusion,'combination');assert.equal(job.suspect,b);
+    job=make([a]);step=push(job,m.nextDiagnosticStep(job),'fail');step=push(job,step,'fail');assert.equal(step.conclusion,'outside-selection');
+    job=make([a]);assert.equal(push(job,m.nextDiagnosticStep(job),'pass').conclusion,'not-reproduced');
+    assert.equal(push(make([a]),{purpose:'baseline',enabled:[a]},'no-change').conclusion,'not-reproduced');
+    job=make([a]);step=push(job,m.nextDiagnosticStep(job),'interrupted');assert.equal(step.pause,true);
+    job.results[0].userConfirmed=true;assert.equal(m.nextDiagnosticStep(job).purpose,'group-off');
+    job=make([a]);step=m.nextDiagnosticStep(job);
+    for(const outcome of ['fail','pass','fail','pass'])step=push(job,step,outcome);
+    assert.equal(push(job,step,'fail',{stage:'reading'}).conclusion,'unstable','different failures do not establish attribution');
+    job=make([a]);job.originalDisabled=[b];assert.deepEqual(m.restoreDisabled(job,[a,'third-party/Manual-Off']),['third-party/Manual-Off']);
+    assert.equal(m.uncontrolledSwitchChanges(job,['third-party/Manual-Off']),true);
+    const publicText=JSON.stringify(m.diagnosticPublicReport(make([a])));
+    for(const secret of ['DO_NOT_EXPORT','private.json','c'.repeat(32),'b'.repeat(32),'a'.repeat(32)])assert.ok(!publicText.includes(secret));
+    assert.equal(m.sanitizeDiagnosticJob({...make([a]),targets:['../escape']}),null);
+    const host=await import(pathToFileURL(path.join(__dirname,'../src/diagnostic-host.js')));
+    const oldFetch=global.fetch,oldWindow=global.window,oldST=global.SillyTavern;
+    let saved={extension_settings:{disabledExtensions:[a,'third-party/Server-Off']},privateSetting:'synthetic-private'},memory={disabledExtensions:[a,'third-party/Memory-Off']};
+    try {
+        global.window={getRequestHeaders:()=>({'Content-Type':'application/json'})};global.SillyTavern={getContext:()=>({extensionSettings:memory})};
+        global.fetch=async(url,init)=>{if(url.endsWith('/save'))saved=JSON.parse(init.body);return {ok:true,json:async()=>({settings:JSON.stringify(saved)})};};
+        job=make([a]);job.originalDisabled=[];
+        assert.equal(await host.restoreDiagnosticHost(job),true);
+        assert.deepEqual(saved.extension_settings.disabledExtensions,['third-party/Server-Off']);
+        assert.deepEqual(memory.disabledExtensions,['third-party/Memory-Off']);
+        assert.equal(saved.privateSetting,'synthetic-private');
+    } finally {global.fetch=oldFetch;global.window=oldWindow;global.SillyTavern=oldST;}
+    console.log('diagnostic wizard: pass (repeatable off/on evidence, combination, unstable, interrupted, no-op, switch preservation, report privacy)');
+})().catch(error=>{console.error(error);process.exitCode=1;});

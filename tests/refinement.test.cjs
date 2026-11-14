@@ -15,7 +15,8 @@ async function capabilityChecks() {
         }
     });
     const state = new vm.SourceTextModule(fs.readFileSync(path.join(root,'src/db/state.js'),'utf8'),{context});
-    await state.link(()=>{throw new Error('unexpected state import');});await state.evaluate();
+    const policy = new vm.SyntheticModule(['diagnosticBoot'], function(){this.setExport('diagnosticBoot',{sandbox:false,dbName:'outfit_mgr_db',serverBase:'/api/plugins/outfit-manager'});},{context});
+    await state.link(name=>{assert.equal(name,'../diagnostic-policy.js');return policy;});await state.evaluate();
     const mod = new vm.SourceTextModule(fs.readFileSync(path.join(root,'src/db/capabilities.js'),'utf8'),{context});
     await mod.link(()=>state);await mod.evaluate();
     const {inspectBackend}=mod.namespace;

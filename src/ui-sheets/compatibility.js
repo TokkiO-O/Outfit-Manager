@@ -6,6 +6,7 @@ import { getCompatibilityRecord, startCompatibilityRecording, stopCompatibilityR
 import { esc, toast } from '../utils.js';
 import { createSheet, closeSheet } from './sheet-base.js';
 import { saveCompatibilityBaseline, clearCompatibilityBaseline, compareCompatibilityBaseline } from '../compatibility-relations.js';
+import { openDiagnosticWizard } from '../diagnostic-wizard.js';
 
 var labels = { pass: '通过', attention: '需关注', unknown: '无法判断' };
 var relationLabels = { interference: '检测到测试干扰', related: '关联线索', observed: '本次透传正常', uncovered: '本次未覆盖', inactive: '已停用', self: '穿搭本体' };
@@ -65,7 +66,7 @@ export function openCompatibilitySheet() {
     var controller = new AbortController(), unsubscribe, busy = false, report = null;
     var sheet = createSheet('<div class="om-sheet-title">兼容性检查</div><div class="om-compat-body">' +
         '<p>实际测试穿搭请求链、点击传递、样式及本地注入功能，按证据定位干扰来源。不调用模型 API，不自动停用扩展或修改衣柜。</p>' +
-        '<div class="om-compat-actions"><button type="button" class="om-btn om-btn-safe" id="om-compat-run">开始检查</button><button type="button" class="om-btn om-btn-outline" id="om-compat-export" disabled>导出报告</button></div>' +
+        '<div class="om-compat-actions"><button type="button" class="om-btn om-btn-safe" id="om-compat-run">开始检查</button><button type="button" class="om-btn om-btn-outline" id="om-compat-export" disabled>导出报告</button><button type="button" class="om-btn om-btn-outline" id="om-compat-investigate">按所选扩展逐轮复测</button></div>' +
         '<p class="om-hint">报告包含扩展名称与版本、设备概况、检测结果和复现阶段；不包含衣服、图片、聊天正文、API 配置或原始错误正文。</p>' +
         '<details class="om-compat-record"><summary>复现记录（导入后刷新时使用）</summary><p class="om-hint">先开始记录，再关闭本窗口重做操作。重新打开酒馆后回到这里导出报告。记录只保留阶段、大小、内存估计和错误分类，不能确认刷新原因。</p>' +
         '<p id="om-compat-record-status" role="status"></p><div class="om-compat-actions"><button type="button" class="om-btn om-btn-outline" id="om-compat-record-start">开始记录（10 分钟）</button><button type="button" class="om-btn om-btn-outline" id="om-compat-record-stop" hidden>停止记录</button><button type="button" class="om-btn om-btn-outline" id="om-compat-record-clear">清除复现记录</button></div></details>' +
@@ -92,6 +93,7 @@ export function openCompatibilitySheet() {
         }
     }
     sheet.querySelector('#om-compat-run').onclick = run;
+    sheet.querySelector('#om-compat-investigate').onclick = openDiagnosticWizard;
     sheet.querySelector('#om-compat-export').onclick = async function () {
         var value = await run(); if (!value || !sheet.isConnected) return;
         var url = URL.createObjectURL(new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' })), link = document.createElement('a');

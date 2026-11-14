@@ -2,6 +2,7 @@
 // 基于温水 & 克洛宜原作维护；保留原作署名与数据兼容。
 
 var ID_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+import { diagnosticBoot } from '../diagnostic-policy.js';
 export function genId8() {
     var s = '';
     for (var i = 0; i < 8; i++) s += ID_CHARS.charAt(Math.floor(Math.random() * ID_CHARS.length));
@@ -10,14 +11,14 @@ export function genId8() {
 
 // ── 常量 ─────────────────────────────────────────────────
 // ── 常量 ─────────────────────────────────────────────────
-export var DB_NAME = 'outfit_mgr_db';
+export var DB_NAME = diagnosticBoot.dbName;
 export var DB_VERSION = 1;
 export var STORE_NAME = 'data';
-export var LS_KEY = 'outfit_mgr_v4';
-export var SERVER_SEEN_KEY = 'outfit_mgr_server_seen';
+export var LS_KEY = diagnosticBoot.sandbox ? 'outfit_mgr_diagnostic_legacy:' + diagnosticBoot.jobId : 'outfit_mgr_v4';
+export var SERVER_SEEN_KEY = diagnosticBoot.sandbox ? 'outfit_mgr_diagnostic_seen:' + diagnosticBoot.jobId + ':' + diagnosticBoot.roundId : 'outfit_mgr_server_seen';
 // v1 旧 key（迁移用）
 export var LEGACY_DATA_KEY = 'main';
-export var SERVER_BASE = '/api/plugins/outfit-manager';
+export var SERVER_BASE = diagnosticBoot.serverBase;
 export var IMAGE_URL_PREFIX = SERVER_BASE + '/images/';
 export var MIN_SERVER_PLUGIN_VERSION = '2.2.0';
 

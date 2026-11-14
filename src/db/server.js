@@ -9,6 +9,7 @@ import { currentUserPartKey } from './view.js';
 import { inspectBackend } from './capabilities.js';
 import { setSyncState } from './incremental.js';
 import { prepareOutgoingImages } from './images.js';
+import { diagnosticBoot } from '../diagnostic-policy.js';
 
 //  Server 通信
 // ══════════════════════════════════════════════════════════
@@ -63,17 +64,20 @@ export function scheduleServerCheckpoint() {
 }
 
 export function detectServer(cb) {
+    if (diagnosticBoot.sandbox && diagnosticBoot.storage === 'local') { DB.backendInfo = { installed: false, reachable: false }; cb({ installed: false, ok: true, status: 404, kind: 'diagnostic-local' }); return; }
     var serverWasConfirmed = wasServerPreviouslyConfirmed();
     retryServerRead('server status', function () {
         return fetchServerJson(SERVER_BASE + '/status').then(function (result) {
             if (!result.ok || !result.found) return result;
             var body = result.data;
+            if (diagnosticBoot.sandbox && body && body.diagnosticRoundId !== diagnosticBoot.roundId) return serverReadFailure('diagnostic_scope', 409, '后端未确认隔离测试区，已停止检测', false);
             if (!body || typeof body !== 'object' || body.ok !== true) {
                 return serverReadFailure('unexpected_response', result.status, 'Invalid status response', false);
             }
             return result;
         });
     }, function (result) {
+        if (diagnosticBoot.sandbox && diagnosticBoot.storage === 'server' && (!result.ok || !result.found)) { DB.serverInitFailed = true; cb({ installed: true, ok: false, kind: 'diagnostic_scope', error: '隔离测试区不可用，已停止检测' }); return; }
         if (result.ok && !result.found) {
             DB.backendInfo = { installed: false, reachable: false };
             DB.serverSupportsIncremental = false;

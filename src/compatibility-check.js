@@ -134,6 +134,10 @@ async function extensions(context, signal) {
     rows.forEach(function (item) { item.current = item.id === currentId; });
     return { items: rows, complete: discovered && !truncated && cursor >= targets.length, currentId: currentId };
 }
+export async function getDiagnosticInventory(signal) {
+    var context = null; try { context = SillyTavern.getContext(); } catch (ignored) {}
+    var result = await extensions(context, signal); return result.items;
+}
 
 function uiChecks(targetId) {
     var result = [], duplicate = document.querySelectorAll('#om-fab-main').length > 1 || document.querySelectorAll('.om-overlay').length > 1;

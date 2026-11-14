@@ -8,6 +8,7 @@ import { state, fn } from './bridge.js';
 import { getActiveKit, getKitForCurrent } from './data.js';
 
 import { CHAT_STATE_KEY, getChatContext, getChatIdentity, currentSession, getSession, attachSession, persistSession, hydrateSession, needsHostSave, markHostSaved } from './chat-session.js';
+import { diagnosticWritesAllowed } from './diagnostic-policy.js';
 export { CHAT_STATE_KEY, getChatContext, getChatIdentity } from './chat-session.js';
 var installed = false, lastChatIdentity = null, lastAppliedState = null, lastBrowseContext=null, listeners = [];
 var saveStates = new Map();
@@ -34,6 +35,7 @@ export function notifyChat(options) {
 }
 
 export function saveChatState(identity) {
+    if (!diagnosticWritesAllowed()) return Promise.resolve(false);
     identity = identity || getChatIdentity();
     var value = getSession(identity) || (identity === getChatIdentity() && getChatState());
     if (!value) return Promise.resolve(false);

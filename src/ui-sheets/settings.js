@@ -18,6 +18,7 @@ import { openTagLexiconSheet } from './tag-lexicon.js';
 import { describeBackend, recheckBackend } from '../db/capabilities.js';
 import { DB } from '../db/state.js';
 import { openCompatibilitySheet } from './compatibility.js';
+import { openDiagnosticWizard } from '../diagnostic-wizard.js';
 import { openRuntimeErrorsSheet } from './runtime-errors.js';
 
 export function getSettingsDataStats() {
@@ -206,7 +207,7 @@ export function openSettingsSheet() {
         '<label class="om-setting-row om-row-inline">附带备用穿搭文字<input type="checkbox" class="om-chk" id="om-budget-include"' + (budget.includeCandidates ? ' checked' : '') + '></label>',
         '<div class="om-sub-sec">卡顿排查</div>',
         '<button type="button" class="om-btn om-btn-outline" id="om-debug-perf">性能自检</button>',
-        '<button type="button" class="om-btn om-btn-outline" id="om-debug-compatibility">兼容性检查与复现记录</button>',
+        '<button type="button" class="om-btn om-btn-outline" id="om-debug-compatibility">兼容性检查与复现记录</button><button type="button" class="om-btn om-btn-outline" id="om-debug-investigation">逐轮冲突排查（手动启动）</button>',
         '<button type="button" class="om-btn om-btn-outline" id="om-debug-runtime-errors">运行错误日志</button>',
         '<div class="om-sub-sec">保存状态与后端</div>',
         '<p class="om-hint" data-om-backend-info>' + esc(describeBackend(DB.backendInfo)) + '</p>',
@@ -587,6 +588,7 @@ export function openSettingsSheet() {
     sheet.querySelectorAll('[id^="om-budget-"]').forEach(function (el) { el.addEventListener('change', saveBudget); });
     sheet.querySelector('#om-debug-perf').onclick=function(){if(fn.openPerfSheet)fn.openPerfSheet();};
     sheet.querySelector('#om-debug-compatibility').onclick = openCompatibilitySheet;
+    sheet.querySelector('#om-debug-investigation').onclick = openDiagnosticWizard;
     sheet.querySelector('#om-debug-runtime-errors').onclick = openRuntimeErrorsSheet;
     sheet.querySelector('#om-debug-preview').onclick = function () { if (fn.openInjectionPreview) fn.openInjectionPreview(); };
     sheet.querySelector('#om-debug-sync').onclick = function () { if (fn.openSyncCenter) fn.openSyncCenter(); };

@@ -14,7 +14,9 @@ import { prepareOutgoingImages } from './images.js';
 // ── v2 分包模式 server 通信 ─────────────────────────────
 
 // 统一调度：根据后端版本选择全量或分包
+import { diagnosticWritesAllowed } from '../diagnostic-policy.js';
 export function scheduleServerPutKey(key) {
+    if (!diagnosticWritesAllowed()) return;
     if (!DB.serverMode) return;
     if (DB.suppressServerWrites) return;
     if (!DB.serverSupportsPartitions) {
@@ -47,6 +49,7 @@ export function schedulePartitionFlush(delay) {
 
 // 批量 flush 所有 dirty key
 export function flushDirtyPartitions() {
+    if (!diagnosticWritesAllowed()) return;
     if (DB.serverSupportsPartitions && (!DB.serverHydrated || DB.serverInitFailed)) {
         DB.dirtyPartKeys = {};
         return;
