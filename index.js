@@ -14,6 +14,9 @@ import { activateRecovery, deactivateRecovery, injectRecoveryBtn } from './src/u
 import { installDiagnostics } from './src/diagnose.js';
 import { installFeatures, refreshSyncBadge } from './src/ui-features.js';
 import { initializeCompatibilityJournal } from './src/compatibility-journal.js';
+import { initializeRuntimeErrors, captureRuntimeError } from './src/runtime-errors.js';
+
+initializeRuntimeErrors();
 
 // ── 注册跨模块函数 ─────────────────────────────────────
 registerMainFn();
@@ -53,13 +56,13 @@ function startNormalUi() {
         var hasFab = !!document.getElementById(FAB_ID);
         if (!force && hasBtn && hasFab) return;
         if (!hasBtn) {
-            try { injectBtn(); } catch (e) { console.error('[outfit-manager] injectBtn', e); }
+            try { injectBtn(); } catch (e) { captureRuntimeError(e, { operation: 'interface', source: 'index.js' }); console.error('[outfit-manager] injectBtn', e); }
         }
         if (!hasFab) {
-            try { injectFab(); } catch (e2) { console.error('[outfit-manager] injectFab', e2); }
+            try { injectFab(); } catch (e2) { captureRuntimeError(e2, { operation: 'interface', source: 'index.js' }); console.error('[outfit-manager] injectFab', e2); }
         }
         if (!hasBtn) {
-            try { updateBtn(); } catch (e3) {}
+            try { updateBtn(); } catch (e3) { captureRuntimeError(e3, { operation: 'interface', source: 'index.js' }); }
         }
     }
     setTimeout(function () { bootEntries(true); }, 200);
@@ -67,14 +70,14 @@ function startNormalUi() {
     setTimeout(function () { bootEntries(true); }, 2000);
     setInterval(function () { bootEntries(false); }, 3000);
 
-    try { preResolveActiveImages(); } catch (e4) {}
+    try { preResolveActiveImages(); } catch (e4) { captureRuntimeError(e4, { operation: 'load', source: 'index.js' }); }
 
     // 衣柜分包是「按需载入」的：切换角色/预设后，分包从 IndexedDB 读回来的那一刻
     // 通知界面重绘一次，避免停在「正在载入衣柜…」。
     setPartitionLoadedHandler(function (partKey) {
         try {
             if (typeof fn.requestWardrobeRefresh === 'function') fn.requestWardrobeRefresh(partKey);
-        } catch (eLoad) {}
+        } catch (eLoad) { captureRuntimeError(eLoad, { operation: 'interface', source: 'index.js' }); }
     });
 
     // 性能自检入口：控制台执行 __omDiag() 输出一份环境/数据/渲染成本报告
@@ -97,6 +100,7 @@ function handleStorageInitialization(err) {
         return;
     }
     console.error('[outfit-manager] 初始化失败，已进入安全恢复模式：', err);
+    captureRuntimeError(err, { operation: 'startup', source: 'index.js' });
     activateRecovery(err, startNormalUi);
     setTimeout(injectRecoveryBtn, 300);
     if (!recoveryBtnTimer) recoveryBtnTimer = setInterval(injectRecoveryBtn, 2000);

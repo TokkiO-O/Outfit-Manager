@@ -2,6 +2,7 @@
 // 基于温水 & 克洛宜原作维护；保留原作署名与数据兼容。
 
 import { defPartition, ensurePartDefaults } from '../data.js';
+import { captureRuntimeError } from '../runtime-errors.js';
 import { idbGet, idbPut } from './idb.js';
 import { save } from './legacy.js';
 import { scheduleServerPutKey } from './server-partitions.js';
@@ -111,6 +112,7 @@ export function startPartitionLoad(partKey, firstCallback) {
     DB.partLoadCbs[partKey] = firstCallback ? [firstCallback] : [];
     function loaded(raw, error) {
         if (error || !raw) {
+            captureRuntimeError(error || new Error('衣柜读取失败'), { operation: 'load', source: 'src/db/partitions.js' });
             DB.partLoadErrors[partKey] = { at: Date.now(), message: error ? error.message : '本地衣柜未能读取，已停止写入' };
             var failedCallbacks = DB.partLoadCbs[partKey] || [];
             delete DB.partLoadCbs[partKey];

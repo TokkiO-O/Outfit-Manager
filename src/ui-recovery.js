@@ -9,6 +9,7 @@ import {
 import { BTN_ID, findMenu } from './ui-fab.js';
 import { esc } from './utils.js';
 import { ensureFullStyles } from './styles/index.js';
+import { openRuntimeErrorsSheet } from './ui-sheets/runtime-errors.js';
 
 var RECOVERY_OVERLAY_ID = 'om-recovery-overlay';
 var activeError = null;
@@ -86,6 +87,7 @@ function renderRecovery() {
         '</details>',
         '<div class="om-recovery-actions">',
         '<button class="om-btn om-btn-outline" id="om-recovery-export"' + (busy ? ' disabled' : '') + '><i class="fa-solid fa-download"></i> 导出诊断</button>',
+        '<button class="om-btn om-btn-outline" id="om-recovery-errors">运行错误日志</button>',
         '<button class="om-btn om-btn-outline" id="om-recovery-retry"' + (busy || diagnosing ? ' disabled' : '') + '><i class="fa-solid fa-rotate"></i> 重新检测</button>',
         (snapshot && diagnosis && diagnosis.healthy === false && diagnosis.canRestore
             ? '<button class="om-btn om-btn-safe" id="om-recovery-restore"' + (busy || diagnosing ? ' disabled' : '') + '><i class="fa-solid fa-clock-rotate-left"></i> 一键恢复</button>'
@@ -97,6 +99,7 @@ function renderRecovery() {
 
     overlay.querySelector('#om-recovery-close').addEventListener('click', closeRecovery);
     overlay.querySelector('#om-recovery-export').addEventListener('click', exportDiagnosis);
+    overlay.querySelector('#om-recovery-errors').addEventListener('click', openRuntimeErrorsSheet);
     overlay.querySelector('#om-recovery-retry').addEventListener('click', retryInitialization);
     var restoreBtn = overlay.querySelector('#om-recovery-restore');
     if (restoreBtn) restoreBtn.addEventListener('click', restoreLatest);

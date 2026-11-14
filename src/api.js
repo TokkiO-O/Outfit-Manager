@@ -8,6 +8,7 @@ import { registerVisionWorker, runVisionBatch, imageFingerprint } from './vision
 import { ensurePartitionLoaded } from './db/index.js';
 import { fn } from './bridge.js';
 import { normalizeGarmentParagraph } from './description-format.js';
+import { captureRuntimeError } from './runtime-errors.js';
 
 // ── 端点规范化（兼容 OpenAI / 中转站 / 火山方舟 Ark）────────
 export function normalizeEndpoint(raw, path) {
@@ -236,6 +237,11 @@ export function callViaStProxy(apiCfg, messages, maxTokens, cb, requestOptions) 
 /** 优先 ST 代理，失败再尝试浏览器直连 */
 export function callChatCompletions(apiCfg, messages, maxTokens, cb, requestOptions) {
     requestOptions = requestOptions || {};
+    var callback = cb;
+    cb = function (error, text, raw) {
+        if (error && !(requestOptions.signal && requestOptions.signal.aborted)) captureRuntimeError(error, { operation: 'api', source: 'src/api.js' });
+        callback(error, text, raw);
+    };
     callViaStProxy(apiCfg, messages, maxTokens, function (err, text, raw) {
         if (!err) { cb(null, text, raw); return; }
         if ((requestOptions.signal && requestOptions.signal.aborted) || !apiCfg.allowDirectFallback || !/HTTP (404|501)|网络|跨域|Failed to fetch|NetworkError/i.test(String(err))) { cb(err); return; }
@@ -272,6 +278,8 @@ export function callChatCompletions(apiCfg, messages, maxTokens, cb, requestOpti
 
 // ── 获取模型列表（优先 ST /status 代理）──────────
 export function fetchModelList(apiCfg, cb) {
+    var callback = cb;
+    cb = function (error, list) { if (error) captureRuntimeError(error, { operation: 'models', source: 'src/api.js' }); callback(error, list); };
     var ep = String((apiCfg && apiCfg.endpoint) || '').trim().replace(/\/+$/, '');
     // 和生成走同一套归一化，否则会出现「能生成、拉不到模型」
     var reverseProxy = normalizeReverseProxy(ep);
@@ -738,10 +746,15 @@ export function generateSingleAccDescription(acc, cb) {
 function descriptionResult(text) {
     var parsed = parseAIResponse(text);
     var value = parsed ? parsed.description : (/^\s*(?:\{|\[|```)/.test(text || '') ? '' : text);
-    if (typeof value !== 'string' || !value.trim()) throw new Error('未返回可用的服装描述，原有内容已保留');
+    if (typeof value !== 'string' || !value.trim()) throw invalidDescriptionError();
     var paragraph=normalizeGarmentParagraph(value);
-    if(!paragraph)throw new Error('未返回可用的服装描述，原有内容已保留');
+    if(!paragraph)throw invalidDescriptionError();
     return { name: parsed && typeof parsed.name === 'string' ? parsed.name.trim() : '', description: paragraph };
+}
+
+function invalidDescriptionError() {
+    var error = new Error('未返回可用的服装描述，原有内容已保留');
+    captureRuntimeError(error, { operation: 'description', source: 'src/api.js' }); return error;
 }
 
 async function performVisionTask(job, item, signal) {

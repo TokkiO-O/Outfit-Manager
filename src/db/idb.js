@@ -2,6 +2,7 @@
 // 基于温水 & 克洛宜原作维护；保留原作署名与数据兼容。
 
 import { DB, DB_NAME, DB_VERSION, STORE_NAME } from './state.js';
+import { captureRuntimeError } from '../runtime-errors.js';
 
 // ══════════════════════════════════════════════════════════
 //  IndexedDB 底层
@@ -15,7 +16,7 @@ export function openDB(cb) {
         if (!db.objectStoreNames.contains(STORE_NAME)) db.createObjectStore(STORE_NAME);
     };
     req.onsuccess = function (e) { DB.dbInstance = e.target.result; cb(DB.dbInstance); };
-    req.onerror = function () { cb(null); };
+    req.onerror = function () { captureRuntimeError(req.error || new Error('无法打开本地衣柜存储'), { operation: 'load', source: 'src/db/idb.js' }); cb(null); };
 }
 
 // 通用：读单个 key
@@ -61,7 +62,7 @@ export function idbPut(key, value, cb) {
         var tx = db.transaction(STORE_NAME, 'readwrite');
         tx.objectStore(STORE_NAME).put(value, key);
         tx.oncomplete = function () { if (cb) cb(true); };
-        tx.onerror = function () { if (cb) cb(false); };
+        tx.onerror = function () { captureRuntimeError(tx.error || new Error('本地写入失败'), { operation: 'save', source: 'src/db/idb.js' }); if (cb) cb(false); };
     });
 }
 
@@ -79,7 +80,7 @@ export function idbDelete(key, cb) {
 // 通用：批量写多个 key（同一事务）
 export function idbPutBatch(entries, cb) {
     var finished = false;
-    function done(ok) { if (!finished) { finished = true; if (cb) cb(ok); } }
+    function done(ok) { if (!finished) { finished = true; if (!ok) captureRuntimeError(new Error('本地批量写入失败'), { operation: 'save', source: 'src/db/idb.js' }); if (cb) cb(ok); } }
     try { openDB(function (db) {
         if (!db) { done(false); return; }
         var tx = db.transaction(STORE_NAME, 'readwrite'), store = tx.objectStore(STORE_NAME);

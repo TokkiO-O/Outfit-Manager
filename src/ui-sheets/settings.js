@@ -18,6 +18,7 @@ import { openTagLexiconSheet } from './tag-lexicon.js';
 import { describeBackend, recheckBackend } from '../db/capabilities.js';
 import { DB } from '../db/state.js';
 import { openCompatibilitySheet } from './compatibility.js';
+import { openRuntimeErrorsSheet } from './runtime-errors.js';
 
 export function getSettingsDataStats() {
     var meta = loadMeta();
@@ -206,6 +207,7 @@ export function openSettingsSheet() {
         '<div class="om-sub-sec">卡顿排查</div>',
         '<button type="button" class="om-btn om-btn-outline" id="om-debug-perf">性能自检</button>',
         '<button type="button" class="om-btn om-btn-outline" id="om-debug-compatibility">兼容性检查与复现记录</button>',
+        '<button type="button" class="om-btn om-btn-outline" id="om-debug-runtime-errors">运行错误日志</button>',
         '<div class="om-sub-sec">保存状态与后端</div>',
         '<p class="om-hint" data-om-backend-info>' + esc(describeBackend(DB.backendInfo)) + '</p>',
         '<div class="om-debug-actions"><button type="button" class="om-btn om-btn-outline" id="om-debug-sync">保存状态 · <span data-om-sync-label></span></button><button type="button" class="om-btn om-btn-outline" id="om-debug-backend">重新检测后端</button></div>',
@@ -585,6 +587,7 @@ export function openSettingsSheet() {
     sheet.querySelectorAll('[id^="om-budget-"]').forEach(function (el) { el.addEventListener('change', saveBudget); });
     sheet.querySelector('#om-debug-perf').onclick=function(){if(fn.openPerfSheet)fn.openPerfSheet();};
     sheet.querySelector('#om-debug-compatibility').onclick = openCompatibilitySheet;
+    sheet.querySelector('#om-debug-runtime-errors').onclick = openRuntimeErrorsSheet;
     sheet.querySelector('#om-debug-preview').onclick = function () { if (fn.openInjectionPreview) fn.openInjectionPreview(); };
     sheet.querySelector('#om-debug-sync').onclick = function () { if (fn.openSyncCenter) fn.openSyncCenter(); };
     sheet.querySelector('#om-debug-backend').onclick = function () {

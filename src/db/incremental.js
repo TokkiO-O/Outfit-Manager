@@ -2,6 +2,7 @@
 // 基于温水 & 克洛宜原作维护；保留原作署名与数据兼容。
 
 import { DB, SERVER_BASE } from './state.js';
+import { captureRuntimeError } from '../runtime-errors.js';
 import { idbGet, idbPut } from './idb.js';
 import { getWriteHeaders, scheduleServerCheckpoint, scheduleServerPut } from './server.js';
 import { applyChatPartition, metaForStorage, partitionForStorage } from '../chat-state.js';
@@ -20,6 +21,7 @@ export function setSyncState(status, error) {
     if (DB.syncState === status && DB.syncError === (error || null)) return;
     DB.syncState = status;
     DB.syncError = error || null;
+    if (status === 'error' || status === 'conflict') captureRuntimeError(error, { operation: 'save', source: 'src/db/incremental.js' });
     listeners.slice().forEach(function (listener) { try { listener(); } catch (e) {} });
 }
 

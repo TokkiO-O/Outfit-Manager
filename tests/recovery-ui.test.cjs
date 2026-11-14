@@ -74,6 +74,7 @@ async function run() {
     let initCalls = 0;
     let restoreCalls = 0;
     let recoveredCalls = 0;
+    let logCalls = 0;
     const diagnosis = {
         ok: true,
         healthy: false,
@@ -135,6 +136,11 @@ async function run() {
                 this.setExport('ensureFullStyles', () => {});
             }, { context });
         }
+        if (specifier === './ui-sheets/runtime-errors.js') {
+            return new vm.SyntheticModule(['openRuntimeErrorsSheet'], function () {
+                this.setExport('openRuntimeErrorsSheet', () => { logCalls++; });
+            }, { context });
+        }
         throw new Error('Unexpected import: ' + specifier);
     });
     await mod.evaluate();
@@ -151,6 +157,9 @@ async function run() {
     assert.equal(diagnoseCalls, 1, 'automatic diagnosis should run once');
     assert.match(overlay.innerHTML, /一键恢复/, 'verified snapshot should expose explicit restore action');
     assert.equal(restoreCalls, 0, 'diagnosis must never restore automatically');
+    overlay.querySelector('#om-recovery-errors').click();
+    assert.equal(logCalls, 1, 'runtime logs remain accessible when startup fails');
+    assert.equal(initCalls, 0, 'viewing error logs does not retry or restore storage');
 
     overlay.querySelector('#om-recovery-close').click();
     assert.equal(document.getElementById('om-recovery-overlay'), null);

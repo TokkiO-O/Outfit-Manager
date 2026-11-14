@@ -6,6 +6,7 @@ import { getChatContext, getChatState, getWardrobeView, getBoundPresetId } from 
 import { OM_VERSION } from './version.js';
 import { diagnosticErrorKind, getCompatibilityRecord, safeExtensionId } from './compatibility-journal.js';
 import { getCompatibilityHookState, probeCompatibilityFetch } from './compatibility-probe.js';
+import { getRuntimeErrors } from './runtime-errors.js';
 
 function version(value) { return typeof value === 'string' && /^\d+\.\d+(?:\.\d+)?(?:[-+][A-Za-z0-9.-]+)?$/.test(value) && value.length < 50 ? value : null; }
 function count(value) { return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.round(value)) : null; }
@@ -207,6 +208,11 @@ export async function collectCompatibilityReport(options) {
     }
     checks.push.apply(checks, await settledUiChecks(options.targetId, signal));
     report.recording = getCompatibilityRecord();
+    var runtimeErrors = getRuntimeErrors(), errorEntries = runtimeErrors.data.entries;
+    report.runtime.errorLog = { enabled: runtimeErrors.data.enabled, persistence: runtimeErrors.persistence, stored: errorEntries.length, suppressed: runtimeErrors.data.suppressed, recent: errorEntries.slice(-20) };
+    checks.push(row('runtime-error-log', errorEntries.length || !runtimeErrors.persistence ? 'attention' : runtimeErrors.data.enabled ? 'pass' : 'unknown', '运行错误日志',
+        errorEntries.length ? '最近 7 天保留 ' + errorEntries.length + ' 条穿搭错误记录（重复合并），不代表当前存在扩展冲突。' : runtimeErrors.data.enabled ? '暂未记录到可归属穿搭的运行错误。' : '日常错误记录已暂停，不能据此判断运行正常。',
+        !runtimeErrors.persistence ? '本机日志保存不可用，刷新后可能丢失；可在运行错误日志中直接导出。' : errorEntries.length ? '到设置 → 调试 → 运行错误日志查看分类与文件位置。' : ''));
     if (!report.recording.persistence) checks.push(row('record-persistence', 'attention', '复现记录保存', '本机记录存储不可用或写入失败，刷新后记录可能丢失。', '检查浏览器存储限制；这与衣柜数据库的小型读写检查是不同的存储位置。'));
     var journal = report.recording.data, imported = journal && journal.import, incomplete = imported && !['complete', 'cancelled', 'failed'].includes(imported.stage);
     if (journal && journal.status === 'interrupted' && incomplete) checks.push(row('last-import', 'attention', '上次导入记录', '记录期间页面重新载入，上次导入停在“' + compatibilityStageLabel(imported.stage) + '”。', '只能确认没有记录到完成，无法区分手动刷新、关闭、崩溃或系统回收。'));
