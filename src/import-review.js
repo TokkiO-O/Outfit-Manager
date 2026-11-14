@@ -61,6 +61,7 @@ export async function reviewImport(source,mode,options) {
             sheet.querySelector('#om-import-cancel').onclick=function(){if(!committing)closeSheet(sheet);};
             sheet.querySelector('#om-import-confirm').onclick=async function(){
                 if(committing)return;committing=true;this.disabled=true;this.textContent='正在核对与保存…';
+                job.note('saving');
                 sheet.querySelector('#om-import-cancel').disabled=true;
                 try{
                     await withLoadedPartitions(Object.keys(DB.knownPartKeys),async function(){
@@ -83,13 +84,14 @@ export async function reviewImport(source,mode,options) {
                         applyChatContext();scheduleServerPutKey('meta');
                     });
                     if(fn.renderViewbar)fn.renderViewbar();if(fn.requestWardrobeRefresh)fn.requestWardrobeRefresh();
-                    notifyChat();closeSheet(sheet);toast('导入完成：新增 '+count.added+'，更新 '+count.updated+'，完全重复跳过 '+count.skipped);
+                    job.note('complete');notifyChat();closeSheet(sheet);toast('导入完成：新增 '+count.added+'，更新 '+count.updated+'，完全重复跳过 '+count.skipped);
                 }catch(failure){
+                    job.fail(failure);
                     toast(failure.message,true);sheet.querySelector('#om-import-save-status').textContent=failure.message;
                     this.disabled=false;this.textContent='确认导入';sheet.querySelector('#om-import-cancel').disabled=false;
                 }finally{committing=false;}
             };
             return plan;
         });
-    }catch(error){job.cancel();toast('导入已停止：'+error.message,true);return null;}
+    }catch(error){job.fail(error);job.cancel();toast('导入已停止：'+error.message,true);return null;}
 }

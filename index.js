@@ -13,6 +13,7 @@ import { injectFab, updateBtn, injectBtn, registerFabFn, FAB_ID, BTN_ID } from '
 import { activateRecovery, deactivateRecovery, injectRecoveryBtn } from './src/ui-recovery.js';
 import { installDiagnostics } from './src/diagnose.js';
 import { installFeatures, refreshSyncBadge } from './src/ui-features.js';
+import { initializeCompatibilityJournal } from './src/compatibility-journal.js';
 
 // ── 注册跨模块函数 ─────────────────────────────────────
 registerMainFn();
@@ -24,6 +25,7 @@ registerFabFn();
 // ── 启动 ──────────────────────────────────────────────────
 // 样式可以先注入（不依赖数据）
 injectCriticalStyles();
+initializeCompatibilityJournal();
 
 // 初始化存储：探测后端 → 加载 meta → 迁移 → 预加载 partitions
 // 所有依赖数据的操作（注入拦截、悬浮球、按钮）放在回调里

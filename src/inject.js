@@ -11,6 +11,8 @@ import { toast } from './utils.js';
 import { state, fn } from './bridge.js';
 import { getChatState, sceneText, getChatIdentity } from './chat-state.js';
 import { buildInjectionPlan } from './injection-plan.js';
+import { answerCompatibilityProbe, markCompatibilityHooks, markCompatibilityCompletion } from './compatibility-probe.js';
+import { recordCompatibilityRequest } from './compatibility-journal.js';
 
 var BAIBAOKU_SAVE_GENERATE_PATH = '/api/plugins/baibaoku/v1/chats/save-generate';
 var RECENT_INJECTED_BODY_TTL = 2 * 60 * 1000;
@@ -349,6 +351,7 @@ function registerCompletionEventInjection() {
         };
 
         eventSource.on(eventName, handler);
+        markCompatibilityCompletion(true);
         if (typeof eventSource.makeFirst === 'function') {
             eventSource.makeFirst(eventName, handler);
         }
@@ -380,12 +383,14 @@ export function setupInjection() {
     var origFetch = window.fetch;
     window.fetch = function (input, init) {
         try {
+            var probe = answerCompatibilityProbe(input, init); if (probe) return probe;
             // 跳过插件内部的 API 调用
             if (init && (init.__omInternal || (init.headers && (init.headers['X-OM-Internal'] || (typeof init.headers.get === 'function' && init.headers.get('X-OM-Internal')))))) {
                 var internal = Object.assign({}, init); delete internal.__omInternal;
                 return origFetch.call(this, input, internal);
             }
             if (!isChatGenerationRequest(input)) return origFetch.apply(this, arguments);
+            recordCompatibilityRequest(isBaibaokuSaveGenerateRequest(input) ? 'background' : 'normal');
             if (init && init.body && typeof init.body === 'string') {
                 var nb = tryInjectBody(init.body, { baibaokuSaveGenerate: isBaibaokuSaveGenerateRequest(input) });
                 if (nb) { init = Object.assign({}, init, { body: nb }); return origFetch.call(this, input, init); }
@@ -397,9 +402,10 @@ export function setupInjection() {
     XMLHttpRequest.prototype.open = function (method, url) { this.__omUrl = url; return origOpen.apply(this, arguments); };
     var origSend = XMLHttpRequest.prototype.send;
     XMLHttpRequest.prototype.send = function (body) {
-        try { if (isChatGenerationRequest(this.__omUrl) && body && typeof body === 'string') { var nb = tryInjectBody(body); if (nb) return origSend.call(this, nb); } } catch (e) {}
+        try { if (isChatGenerationRequest(this.__omUrl) && body && typeof body === 'string') { recordCompatibilityRequest('xhr'); var nb = tryInjectBody(body); if (nb) return origSend.call(this, nb); } } catch (e) {}
         return origSend.apply(this, arguments);
     };
+    markCompatibilityHooks(window.fetch, XMLHttpRequest.prototype.open, XMLHttpRequest.prototype.send);
 }
 
 export function isChatGenerationRequest(input) {

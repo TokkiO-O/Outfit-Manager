@@ -492,10 +492,11 @@ function importData() {
         var file = fileInp.files[0]; if (!file) return;
         var target=currentUserPartKey();if(modal.parentNode)modal.parentNode.removeChild(modal);
         var job=createImportProgress();if(!job)return;
+        job.note('reading',{fileBytes:file.size});
         try {
             var imported=await readImportFile(file,{local:!isServerMode(),signal:job.signal,onProgress:job.update});
             await reviewImport(imported,importMode,{job:job,targetUserKey:target});
-        }catch(error){job.cancel();toast('导入已停止：'+error.message,true);}
+        }catch(error){job.fail(error);job.cancel();toast('导入已停止：'+error.message,true);}
     });
 }
 
