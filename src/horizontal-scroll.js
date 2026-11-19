@@ -2,7 +2,25 @@
 // 基于温水 & 克洛宜原作维护；保留原作署名与数据兼容。
 
 var bindings = new WeakMap();
+var renderContexts = new WeakMap();
 var DRAG_DISTANCE = 6;
+
+// Capture positions before replacing the buttons, then restore synchronously
+// after both rows (and the accessory switch) have been rebuilt.
+export function preserveHorizontalScroll(container, context, parent) {
+    var previous = renderContexts.get(container), sameContext = previous && previous.context === context;
+    var main = container.querySelector('.om-cat-row-main'), sub = container.querySelector('.om-cat-row-sub');
+    var mainLeft = sameContext && main ? main.scrollLeft : 0;
+    var subLeft = sameContext && previous.parent === parent && sub ? sub.scrollLeft : 0;
+    return function () {
+        var nextMain = container.querySelector('.om-cat-row-main'), nextSub = container.querySelector('.om-cat-row-sub');
+        // A different parent starts a fresh subcategory row. Different wardrobes
+        // never inherit an unrelated offset; the browser clamps shorter rows.
+        if (nextMain) nextMain.scrollLeft = mainLeft;
+        if (nextSub) nextSub.scrollLeft = subLeft;
+        renderContexts.set(container, { context: context, parent: parent });
+    };
+}
 
 export function unbindHorizontalScroll(row) {
     var binding = row && bindings.get(row);

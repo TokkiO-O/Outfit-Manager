@@ -37,7 +37,7 @@ function fixture() {
     return { row, doc, view, classes, captures };
 }
 (async () => {
-    const { bindHorizontalScroll, unbindHorizontalScroll } = await import(pathToFileURL(path.join(__dirname, '../src/horizontal-scroll.js')));
+    const { bindHorizontalScroll, unbindHorizontalScroll, preserveHorizontalScroll } = await import(pathToFileURL(path.join(__dirname, '../src/horizontal-scroll.js')));
     const { row, doc, view, classes, captures } = fixture();
     const button = { closest: () => null };
     let clicks = 0; row.addEventListener('click', () => clicks++);
@@ -66,5 +66,33 @@ function fixture() {
     row.send('pointerdown'); doc.send('pointermove', { clientX: 230 }); doc.send('pointercancel'); assert.equal(doc.count() + view.count() + captures.size, 0);
     for (let i = 0; i < 100; i++) { row.send('pointerdown'); unbindHorizontalScroll(row); assert.equal(doc.count() + view.count(), 0); bindHorizontalScroll(row); }
     unbindHorizontalScroll(row); assert.equal(row.count(), 1, 'redraws dispose every old scrolling handler');
-    console.log('horizontal scroll: pass (button drag, click safety, keyboard, wheel, native touch, cancellation and bounded listeners)');
+    let rows = { main: fixture().row, sub: fixture().row };
+    const container = { querySelector: selector => selector.endsWith('-main') ? rows.main : rows.sub };
+    function redraw(context, parent, width = 600) {
+        const restore = preserveHorizontalScroll(container, context, parent);
+        rows = { main: fixture().row, sub: fixture().row };
+        rows.main.scrollWidth = width;
+        restore();
+    }
+    redraw('user:one', 'parent-a');
+    rows.main.scrollLeft = 250; rows.sub.scrollLeft = 120;
+    redraw('user:one', 'parent-a');
+    assert.equal(rows.main.scrollLeft, 250, 'choosing a category keeps the main row at its previous position');
+    assert.equal(rows.sub.scrollLeft, 120, 'choosing a subcategory keeps both rows in place');
+    redraw('user:one', 'parent-b');
+    assert.equal(rows.main.scrollLeft, 250, 'changing a parent still preserves the main row');
+    assert.equal(rows.sub.scrollLeft, 0, 'a different parent does not inherit an unrelated subcategory offset');
+    rows.sub.scrollLeft = 150;
+    redraw('user:two', 'parent-b');
+    assert.equal(rows.main.scrollLeft, 0, 'a different wardrobe starts with its own rows');
+    assert.equal(rows.sub.scrollLeft, 0);
+    rows.main.scrollLeft = 300; rows.sub.scrollLeft = 80;
+    redraw('user:two', 'parent-b', 260);
+    assert.equal(rows.main.scrollLeft, 60, 'a shorter category list clamps to the remaining scroll range');
+    assert.equal(rows.sub.scrollLeft, 80);
+    const another = { querySelector: () => null };
+    preserveHorizontalScroll(another, 'user:two', 'parent-b')();
+    redraw('user:two', 'parent-b', 260);
+    assert.equal(rows.main.scrollLeft, 60, 'outfit and accessory bars keep independent positions');
+    console.log('horizontal scroll: pass (button drag, click safety, keyboard, native touch, bounded listeners and category/subcategory position retention)');
 })().catch(error => { console.error(error); process.exitCode = 1; });

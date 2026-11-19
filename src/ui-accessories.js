@@ -24,7 +24,7 @@ import {
 import { genId, esc, toast, uniqueIds } from './utils.js';
 import { state, fn } from './bridge.js';
 import { setupBatchSwipeSelect, pushActionUndo } from './ui-outfits/index.js';
-import { bindHorizontalScroll, unbindHorizontalScroll } from './horizontal-scroll.js';
+import { bindHorizontalScroll, unbindHorizontalScroll, preserveHorizontalScroll } from './horizontal-scroll.js';
 
 var OM_TRANSPARENT_PIXEL = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
 
@@ -266,6 +266,7 @@ export function renderAccCatbar() {
     var activeParent = (state.accCat && state.accCat !== '__all__') ? state.accCat : null;
     if (state.accDrillParent) activeParent = state.accDrillParent;
     var subCats = activeParent && hasSubCats(cats, activeParent) ? getSubCats(cats, activeParent) : [];
+    var restoreScroll = preserveHorizontalScroll(accbar, currentPartKey(), activeParent);
 
     var html = '<div class="om-cat-row om-cat-row-main">';
     html += '<span class="om-acc-catbar-label"><i class="fa-solid fa-gem"></i></span>';
@@ -315,6 +316,7 @@ export function renderAccCatbar() {
     });
 
     accbar.querySelectorAll('.om-cat-row').forEach(bindHorizontalScroll);
+    restoreScroll();
 }
 
 // ── 单品网格渲染 ────────────────────────────────────────

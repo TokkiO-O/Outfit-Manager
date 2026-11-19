@@ -3,9 +3,9 @@
 
 import { fn, state } from '../bridge.js';
 import { getCatNames, getSubCats, hasSubCats } from '../data.js';
-import { loadCurrent } from '../db/index.js';
+import { loadCurrent, currentPartKey } from '../db/index.js';
 import { esc } from '../utils.js';
-import { bindHorizontalScroll, unbindHorizontalScroll } from '../horizontal-scroll.js';
+import { bindHorizontalScroll, unbindHorizontalScroll, preserveHorizontalScroll } from '../horizontal-scroll.js';
 
 // ── 分类栏渲染（使用新 API）────────────────────────────────
 export function renderCatbar() {
@@ -42,6 +42,7 @@ export function renderCatbar() {
 
     var activeParent = (state.curCat && state.curCat !== '__all__') ? state.curCat : null;
     var subCats = activeParent && hasSubCats(cats, activeParent) ? getSubCats(cats, activeParent) : [];
+    var restoreScroll = preserveHorizontalScroll(catbar, currentPartKey(), activeParent);
 
     // 第一行：母分类（始终显示，不覆盖）
     var html = '<div class="om-cat-row om-cat-row-main">';
@@ -95,4 +96,5 @@ export function renderCatbar() {
     });
 
     catbar.querySelectorAll('.om-cat-row').forEach(bindHorizontalScroll);
+    restoreScroll();
 }
