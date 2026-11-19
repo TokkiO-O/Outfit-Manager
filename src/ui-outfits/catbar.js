@@ -5,11 +5,13 @@ import { fn, state } from '../bridge.js';
 import { getCatNames, getSubCats, hasSubCats } from '../data.js';
 import { loadCurrent } from '../db/index.js';
 import { esc } from '../utils.js';
+import { bindHorizontalScroll, unbindHorizontalScroll } from '../horizontal-scroll.js';
 
 // ── 分类栏渲染（使用新 API）────────────────────────────────
 export function renderCatbar() {
     var catbar = document.getElementById('om-catbar');
     if (!catbar) return;
+    catbar.querySelectorAll('.om-cat-row').forEach(unbindHorizontalScroll);
     var wrap = document.querySelector('.om-catbar-wrap');
 
     // 单品模式：收起穿搭分类栏，只留单品分类
@@ -92,28 +94,5 @@ export function renderCatbar() {
         });
     });
 
-    // 电脑端：鼠标滚轮横向滚动 + 拖拽（绑定到每一行）
-    catbar.querySelectorAll('.om-cat-row').forEach(function (row) {
-        if (row._wheelBound) return;
-        row.addEventListener('wheel', function (e) {
-            if (Math.abs(e.deltaY) > 0) {
-                e.preventDefault();
-                row.scrollLeft += e.deltaY;
-            }
-        }, { passive: false });
-        var _drag = { down: false, startX: 0, scrollL: 0 };
-        row.addEventListener('mousedown', function (e) {
-            if (e.target.closest && e.target.closest('button')) return;
-            _drag.down = true; _drag.startX = e.pageX; _drag.scrollL = row.scrollLeft;
-            row.style.cursor = 'grabbing'; row.style.userSelect = 'none';
-        });
-        document.addEventListener('mousemove', function (e) {
-            if (!_drag.down) return;
-            row.scrollLeft = _drag.scrollL - (e.pageX - _drag.startX);
-        });
-        document.addEventListener('mouseup', function () {
-            if (_drag.down) { _drag.down = false; row.style.cursor = ''; row.style.userSelect = ''; }
-        });
-        row._wheelBound = true;
-    });
+    catbar.querySelectorAll('.om-cat-row').forEach(bindHorizontalScroll);
 }

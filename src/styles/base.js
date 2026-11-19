@@ -499,6 +499,7 @@ export var BASE_CSS = [
             '.om-acc-toggle.open{background:var(--om-ac-primary,#e8a0b4);color:#fff;border-color:transparent;}',
             '.om-acc-catbar .om-acc-toggle,.om-cat-row .om-acc-toggle{margin:0 6px 0 0;flex-shrink:0;}',
             '.om-cat-row{display:flex;align-items:center;gap:6px;flex-wrap:nowrap;overflow-x:auto;}',
+            '.om-scroll-dragging,.om-scroll-dragging *{cursor:grabbing!important;user-select:none!important;-webkit-user-select:none!important;scroll-behavior:auto!important;}',
 
             '.om-acc-toggle{background:none;border:none;border-left:1px solid rgba(127,127,127,.1);',
             'color:inherit;cursor:pointer;padding:6px 10px;font-size:.72em;opacity:.4;transition:.15s;flex-shrink:0;}',

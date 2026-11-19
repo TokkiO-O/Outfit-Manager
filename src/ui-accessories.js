@@ -24,6 +24,7 @@ import {
 import { genId, esc, toast, uniqueIds } from './utils.js';
 import { state, fn } from './bridge.js';
 import { setupBatchSwipeSelect, pushActionUndo } from './ui-outfits/index.js';
+import { bindHorizontalScroll, unbindHorizontalScroll } from './horizontal-scroll.js';
 
 var OM_TRANSPARENT_PIXEL = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
 
@@ -241,6 +242,7 @@ function openAccBatchCategorySheet(accIds) {
 // ── 单品分类栏渲染 ─────────────────────────────────────────
 export function renderAccCatbar() {
     var accbar = document.getElementById('om-acc-catbar'); if (!accbar) return;
+    accbar.querySelectorAll('.om-cat-row').forEach(unbindHorizontalScroll);
 
     if (!state.accMode) {
         accbar.style.display = 'none';
@@ -312,13 +314,7 @@ export function renderAccCatbar() {
         });
     });
 
-    // 滚轮横向滚动
-    if (!accbar._wheelBound) {
-        accbar.addEventListener('wheel', function (e) {
-            if (Math.abs(e.deltaY) > 0) { e.preventDefault(); accbar.scrollLeft += e.deltaY; }
-        }, { passive: false });
-        accbar._wheelBound = true;
-    }
+    accbar.querySelectorAll('.om-cat-row').forEach(bindHorizontalScroll);
 }
 
 // ── 单品网格渲染 ────────────────────────────────────────
