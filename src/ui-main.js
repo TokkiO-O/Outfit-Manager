@@ -27,6 +27,8 @@ import {
 import { esc, toast } from './utils.js';
 import { ensureFullStyles } from './styles/index.js';
 import { state, fn } from './bridge.js';
+import { closeSheet } from './ui-sheets/sheet-base.js';
+import { captureRuntimeError } from './runtime-errors.js';
 import { OM_VERSION } from './version.js';
 import { DB } from './db/state.js';
 import {
@@ -42,6 +44,7 @@ import {
     closeDetailPanel as closeOutfitDetailPanel,
     randomSelectOutfit,
     classifyAllUncategorized,
+    syncClassificationProgress,
     recordWearHistory
 } from './ui-outfits/index.js';
 import {
@@ -268,6 +271,7 @@ function openPopup() {
     shield.addEventListener('touchstart', function (e) { e.preventDefault(); e.stopPropagation(); }, { passive: false });
     shield.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); }, { passive: false });
     document.body.appendChild(shield);
+    shield.id = 'om-open-shield';
     setTimeout(function () { if (shield.parentNode) shield.parentNode.removeChild(shield); }, 400);
 
     ensureFullStyles();
@@ -418,9 +422,9 @@ function openPopup() {
         if (e.key === 'Escape') {
             if (document.getElementById('om-lightbox')) return;
             if (document.querySelector('.om-modal')) return;
-            if (document.querySelector('.om-sheet-ov')) {
-                var sh = document.querySelector('.om-sheet-ov');
-                if (sh && sh.parentNode) sh.parentNode.removeChild(sh);
+            if (ov.querySelector('.om-sheet-overlay')) {
+                var sheets = ov.querySelectorAll('.om-sheet-overlay');
+                closeSheet(sheets[sheets.length - 1]);
                 return;
             }
             closePopup();
@@ -611,12 +615,22 @@ function openPopup() {
     renderCatbar();
     renderGrid();
     renderBottomStatus();
+    syncClassificationProgress();
 }
 
 function closePopup() {
-    disconnectOutfitGridObserver();
-    clearKitDraft();
-    var ov = document.querySelector('.om-overlay'); if (ov) ov.parentNode.removeChild(ov);
+    var ov = document.querySelector('.om-overlay');
+    if (!ov || ov._omClosing) return;
+    ov._omClosing = true;
+    if (ov._omKeyHandler) { document.removeEventListener('keydown', ov._omKeyHandler); ov._omKeyHandler = null; }
+    if (refreshFrame) { cancelAnimationFrame(refreshFrame); refreshFrame = 0; refreshPartKey = null; }
+    function clean(action) { try { action(); } catch(error) { captureRuntimeError(error,{operation:'interface',source:'src/ui-main.js'}); } }
+    clean(disconnectOutfitGridObserver); clean(clearKitDraft);
+    // Invoke sheet cancellation/unsubscribe hooks before removing their owner.
+    // Running classification belongs to the queue and continues in the background.
+    Array.from(ov.querySelectorAll('.om-sheet-overlay')).reverse().forEach(function(sheet){clean(function(){closeSheet(sheet);});});
+    var shield=document.getElementById('om-open-shield');if(shield)shield.remove();
+    if (ov.parentNode) ov.parentNode.removeChild(ov);
 }
 
 // ── 视角切换栏渲染 ──────────────────────────────────────────

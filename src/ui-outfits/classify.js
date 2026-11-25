@@ -7,14 +7,22 @@ import { batchClassifyOutfits } from '../api.js';
 import { fn, state } from '../bridge.js';
 import { partGetById, partGetAccById } from '../data.js';
 import { currentPartKey, loadCurrent, loadMeta, loadPartition, saveCurrent, savePartition } from '../db/index.js';
-import { esc, getPopupLayer, toast, uniqueIds } from '../utils.js';
+import { esc, getPopupLayer, getPopupSessionId, toast, uniqueIds } from '../utils.js';
 import { SCENE_FILL_BY, inferSceneTagsDetailed, openUncertainTagPicker } from './autotag.js';
 import { renderBottomStatus } from './detail.js';
 import { createSheet, closeSheet } from '../ui-sheets/sheet-base.js';
 import { confirmApiBatch } from '../ui-api-confirm.js';
 import { ensurePartitionLoaded } from '../db/index.js';
 import { getChatIdentity } from '../chat-state.js';
+import { captureRuntimeError } from '../runtime-errors.js';
 var activeClassification = null;
+
+function classificationUiIsCurrent(ticket) {
+    try {
+        return ticket.uiSession !== null && ticket.uiSession === getPopupSessionId() &&
+            ticket.partKey === currentPartKey() && ticket.chatIdentity === getChatIdentity();
+    } catch (ignored) { return false; }
+}
 
 // ── 通用操作撤销栈 ──────────────────────────────────────
 export function pushActionUndo(entry) {
@@ -200,6 +208,7 @@ export function showAutoClassifyResultModal(err, doneCount, errors, extra) {
             }
         });
     });
+    return modal;
 }
 
 export function openClassifyUndoSheet() {
@@ -286,6 +295,14 @@ export function updateProgressChip(done, total, msg) {
     var bar = document.getElementById('om-progress-bar');
     if (text) text.textContent = (msg || ('分类中 ' + done + '/' + total)) + ' · ' + pct + '%';
     if (bar) bar.style.width = pct + '%';
+    var stop = chip.querySelector('#om-classify-stop');
+    if (stop && activeClassification && activeClassification.stopping) { stop.disabled = true; stop.textContent = '正在停止…'; }
+}
+
+export function syncClassificationProgress() {
+    if (!activeClassification) return;
+    var progress = activeClassification.progress;
+    updateProgressChip(progress.done, progress.total, progress.message);
 }
 
 export function hideProgressChip() {
@@ -327,6 +344,7 @@ export function openAutoClassifyModal(ids, options) {
         var yes=await confirmApiBatch({count:selected.length,action:'为这些穿搭生成图片分类'});
         if(!sheet.isConnected)return;this.disabled=false;if(!yes)return;
         var current=await new Promise(function(resolve){ensurePartitionLoaded(sourcePartKey,resolve);});
+        if(!sheet.isConnected)return;
         if(!current||selected.some(function(before){var now=partGetById(current,before.id);return !now||['name','imageData','category','subCategory'].some(function(key){return now[key]!==before[key];});})){toast('范围内服装已有修改，请重新打开分类确认',true);return;}
         closeSheet(sheet);runConfirmedClassification(selected,sourcePartKey);
     };
@@ -334,22 +352,24 @@ export function openAutoClassifyModal(ids, options) {
 
 function runConfirmedClassification(queue, sourcePartKey) {
     if(activeClassification){toast('已有分类正在进行，请等待完成');return;}
-    var ids=queue.map(function(item){return item.id;}),sourceIdentity=getChatIdentity(),ticket={cancel:null};activeClassification=ticket;
+    var ids=queue.map(function(item){return item.id;}),sourceIdentity=getChatIdentity(),ticket={cancel:null,stopping:false,uiSession:getPopupSessionId(),partKey:sourcePartKey,chatIdentity:sourceIdentity,progress:{done:0,total:queue.length,message:'准备中'}};activeClassification=ticket;
     toast('开始分类 ' + queue.length + ' 套（风格 + 春夏/秋冬）');
     updateProgressChip(0, queue.length, '准备中');
     var handle=batchClassifyOutfits(ids, { allowCreate: true, sourcePartKey: sourcePartKey },
         function (done, total, msg) {
+            ticket.progress = { done: done, total: total, message: msg || ('分类中 ' + done + '/' + total) };
             updateProgressChip(done, total, msg || ('分类中 ' + done + '/' + total));
         },
         function (err, doneCount, errors, extra) {
             if(activeClassification===ticket)activeClassification=null;
             extra = extra || {};
             hideProgressChip();
-            if(currentPartKey()===sourcePartKey&&getChatIdentity()===sourceIdentity)state.batchSelected = [];
-            fn.renderCatbar();
-            fn.renderGrid();
-            renderBottomStatus();
-            fn.updateBtn();
+            var foreground = classificationUiIsCurrent(ticket);
+            if(foreground)state.batchSelected = [];
+            try {
+                if(getPopupSessionId()!==null && currentPartKey()===sourcePartKey){fn.renderCatbar();fn.renderGrid();renderBottomStatus();}
+                fn.updateBtn();
+            } catch(error) { captureRuntimeError(error,{operation:'interface',source:'src/ui-outfits/classify.js'}); }
             if (!err && extra.assigned && extra.assigned.length) {
                 state.lastClassifyUndo = {
                     partKey: sourcePartKey,
@@ -365,17 +385,23 @@ function runConfirmedClassification(queue, sourcePartKey) {
                         };
                     })
                 };
+                if(!foreground)pushActionUndo({type:'batch_cat',partKey:sourcePartKey,label:'图片分类 '+extra.assigned.length+' 套穿搭',payload:{items:extra.assigned.map(function(a){return {id:a.id,category:a.prevCategory||'',subCategory:a.prevSubCategory||''};})}});
             }
-            showAutoClassifyResultModal(err, doneCount, errors, extra);
+            if(!foreground){
+                var failed=(errors||[]).length,success=extra.classSuccess!==undefined?extra.classSuccess:Math.max(0,(doneCount||0)-failed);
+                toast(err?'后台分类未完成，可回到穿搭管理重试':'后台分类完成：成功 '+success+'，未完成 '+failed);
+                return;
+            }
+            var resultModal=showAutoClassifyResultModal(err, doneCount, errors, extra);
             var low = (extra.assigned || []).filter(function (a) { return a.lowConfidence && a.id; });
             if (!err && low.length) {
                 setTimeout(function () {
-                    showConfidenceReviewModal(low, sourcePartKey);
+                    if(classificationUiIsCurrent(ticket) && !activeClassification && resultModal && resultModal.isConnected)showConfidenceReviewModal(low, sourcePartKey);
                 }, 400);
             }
         }
     );
-    ticket.cancel=function(){if(handle)handle.cancel();};
+    ticket.cancel=function(){ticket.stopping=true;if(handle)handle.cancel();};
 }
 
 

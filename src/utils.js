@@ -21,6 +21,15 @@ export function uniqueIds(ids) {
 
 export function esc(s) { return s ? String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;') : ''; }
 
+// Async tasks keep a small session token instead of retaining the closed UI.
+var popupSessions = new WeakMap(), popupSessionSequence = 0;
+export function getPopupSessionId() {
+    var overlay = document.querySelector('.om-overlay');
+    if (!overlay || overlay._omClosing || !overlay.isConnected) return null;
+    if (!popupSessions.has(overlay)) popupSessions.set(overlay, ++popupSessionSequence);
+    return popupSessions.get(overlay);
+}
+
 // 获取弹层容器
 export function getPopupLayer() {
     var slot = document.getElementById('om-popup-slot');

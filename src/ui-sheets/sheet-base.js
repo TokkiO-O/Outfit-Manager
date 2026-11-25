@@ -21,8 +21,11 @@ export function createSheet(contentHtml, opts) {
 }
 
 export function closeSheet(ov) {
-    if (ov && ov._omOnClose) { ov._omOnClose(); ov._omOnClose = null; }
-    if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
+    if (!ov) return;
+    var onClose = ov._omOnClose;
+    ov._omOnClose = null;
+    try { if (typeof onClose === 'function') onClose(); }
+    finally { if (ov.parentNode) ov.parentNode.removeChild(ov); }
 }
 
 // ── 全屏 Lightbox（支持底部选择按钮）─────────────────────

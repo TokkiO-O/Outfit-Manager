@@ -4,7 +4,7 @@
 export { preResolveActiveImages } from './core.js';
 export { recordWearHistory } from './history.js';
 // autotag：无对外接口
-export { pushActionUndo, openActionUndoSheet, autoTagUntagged, classifyAllUncategorized, setupBatchSwipeSelect } from './classify.js';
+export { pushActionUndo, openActionUndoSheet, autoTagUntagged, classifyAllUncategorized, syncClassificationProgress, setupBatchSwipeSelect } from './classify.js';
 export { renderCatbar } from './catbar.js';
 export { getFilteredOutfits, randomSelectOutfit } from './filter.js';
 export { patchOutfitCardActive, renderOutfitGrid, disconnectOutfitGridObserver } from './grid.js';

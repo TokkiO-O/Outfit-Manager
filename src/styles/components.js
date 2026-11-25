@@ -195,6 +195,7 @@ export var COMPONENT_CSS = [
             '.om-progress-chip-top{display:flex;align-items:center;gap:8px;font-size:.82em;font-weight:600;margin-bottom:8px;',
             'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}',
             '.om-progress-chip-top i{color:var(--SmartThemeQuoteColor,#7c6daf);}',
+            '.om-progress-chip #om-classify-stop{pointer-events:auto;}',
             '.om-progress-track{height:6px;border-radius:99px;background:rgba(127,127,127,.15);overflow:hidden;}',
             '.om-progress-bar{height:100%;width:0%;border-radius:99px;background:var(--SmartThemeQuoteColor,#7c6daf);transition:width .2s ease;}',
             /* 顶栏防竖排 */
